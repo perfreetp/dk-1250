@@ -1,9 +1,9 @@
 import { useState, useMemo } from 'react';
-import { Plus, ShoppingCart, Stethoscope, Scissors, Gamepad2, Home, TrendingUp } from 'lucide-react';
+import { Plus, TrendingUp, Calendar, RefreshCw } from 'lucide-react';
+import { format, differenceInDays, addDays } from 'date-fns';
 import { useStore } from '../store/useStore';
-import { getMonthlyTotal, getCategoryTotal, formatCurrency } from '../utils/helpers';
-import { Category, CATEGORY_LABELS, CATEGORY_COLORS } from '../types';
-import StatCard from '../components/Common/StatCard';
+import { getMonthlyTotal, getCategoryTotal, formatCurrency, calculateSplitAmount } from '../utils/helpers';
+import { Category, CATEGORY_LABELS } from '../types';
 import ExpenseCard from '../components/Common/ExpenseCard';
 import PetAvatar from '../components/Common/PetAvatar';
 import CategoryIcon from '../components/Common/CategoryIcon';
@@ -13,7 +13,7 @@ import QuickAddForm from '../components/Forms/QuickAddForm';
 const categories: Category[] = ['food', 'medical', 'beauty', 'toy', 'boarding'];
 
 export default function HomePage() {
-  const { pets, expenses, budgets, selectedPetId, setSelectedPet, currentMonth } = useStore();
+  const { pets, expenses, budgets, fixedExpenses, selectedPetId, setSelectedPet, currentMonth, generateFixedExpense } = useStore();
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   
   const monthlyTotal = useMemo(() => getMonthlyTotal(expenses, currentMonth), [expenses, currentMonth]);
@@ -27,7 +27,10 @@ export default function HomePage() {
   const filteredExpenses = useMemo(() => {
     let filtered = expenses.filter(e => e.created_at.startsWith(currentMonth));
     if (selectedPetId) {
-      filtered = filtered.filter(e => e.pet_id === selectedPetId);
+      filtered = filtered.filter(e => {
+        const splits = calculateSplitAmount(e);
+        return splits[selectedPetId] !== undefined;
+      });
     }
     return filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }, [expenses, currentMonth, selectedPetId]);
@@ -40,6 +43,23 @@ export default function HomePage() {
       amount: getCategoryTotal(expenses, currentMonth, cat),
     }));
   }, [expenses, currentMonth]);
+  
+  const upcomingFixedExpenses = useMemo(() => {
+    const today = new Date();
+    return fixedExpenses
+      .filter(f => f.is_active)
+      .map(f => {
+        const nextDate = new Date(f.next_generate_date);
+        const daysUntil = differenceInDays(nextDate, today);
+        return { ...f, daysUntil };
+      })
+      .filter(f => f.daysUntil <= 7)
+      .sort((a, b) => a.daysUntil - b.daysUntil);
+  }, [fixedExpenses]);
+  
+  const handleGenerateFixedExpense = (id: string) => {
+    generateFixedExpense(id);
+  };
   
   return (
     <div className="space-y-6">
@@ -114,6 +134,45 @@ export default function HomePage() {
         </div>
       </div>
       
+      {upcomingFixedExpenses.length > 0 && (
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+          <div className="flex items-center gap-2 mb-4">
+            <Calendar size={20} className="text-primary" />
+            <h2 className="text-lg font-bold">即将生成的固定支出</h2>
+          </div>
+          <div className="space-y-3">
+            {upcomingFixedExpenses.slice(0, 3).map((fixed) => {
+              const pet = pets.find(p => p.id === fixed.pet_id);
+              return (
+                <div key={fixed.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">{pet?.avatar}</span>
+                    <div>
+                      <p className="font-medium">{fixed.name}</p>
+                      <p className="text-sm text-gray-500">
+                        {fixed.daysUntil <= 0 ? '今天到期' : `${fixed.daysUntil}天后`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-bold">{formatCurrency(fixed.amount)}</span>
+                    {fixed.daysUntil <= 0 && (
+                      <button
+                        onClick={() => handleGenerateFixedExpense(fixed.id)}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-primary text-white text-sm rounded-lg hover:bg-primary-600 transition-colors"
+                      >
+                        <RefreshCw size={14} />
+                        <span>生成</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      
       <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
         <h2 className="text-lg font-bold mb-4">我的宠物</h2>
         <div className="flex gap-3 mb-4">
@@ -178,16 +237,14 @@ export default function HomePage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {recentExpenses.map((expense) => {
-              const pet = pets.find(p => p.id === expense.pet_id);
-              return (
-                <ExpenseCard
-                  key={expense.id}
-                  expense={expense}
-                  pet={pet}
-                />
-              );
-            })}
+            {recentExpenses.map((expense) => (
+              <ExpenseCard
+                key={expense.id}
+                expense={expense}
+                pet={pets.find(p => p.id === expense.pet_id)}
+                pets={pets}
+              />
+            ))}
           </div>
         )}
       </div>

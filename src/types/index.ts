@@ -4,12 +4,20 @@ export type Category = 'food' | 'medical' | 'beauty' | 'toy' | 'boarding';
 
 export type ReminderType = 'vaccine' | 'deworming' | 'checkup' | 'other';
 
+export type CycleType = 'monthly' | 'weekly' | 'quarterly' | 'yearly' | 'once';
+
 export interface Pet {
   id: string;
   name: string;
   type: PetType;
   avatar: string;
   created_at: string;
+}
+
+export interface ExpenseSplit {
+  pet_id: string;
+  amount: number;
+  percentage?: number;
 }
 
 export interface Expense {
@@ -22,6 +30,9 @@ export interface Expense {
   remark: string;
   receipt: string;
   is_fixed: boolean;
+  cycle_type?: CycleType;
+  next_generate_date?: string;
+  splits?: ExpenseSplit[];
   created_at: string;
   updated_at: string;
 }
@@ -51,6 +62,22 @@ export interface Reminder {
   type: ReminderType;
   next_date: string;
   remind_days: number;
+  is_processed: boolean;
+  last_processed_date?: string;
+  created_at: string;
+}
+
+export interface FixedExpense {
+  id: string;
+  name: string;
+  amount: number;
+  category: Category;
+  pet_id: string;
+  merchant: string;
+  cycle_type: CycleType;
+  next_generate_date: string;
+  is_active: boolean;
+  splits?: ExpenseSplit[];
   created_at: string;
 }
 
@@ -60,6 +87,7 @@ export interface AppState {
   budgets: Budget[];
   items: Item[];
   reminders: Reminder[];
+  fixedExpenses: FixedExpense[];
   selectedPetId: string | null;
   currentMonth: string;
 }
@@ -78,4 +106,12 @@ export const CATEGORY_COLORS: Record<Category, string> = {
   beauty: '#DDA0DD',
   toy: '#98D8C8',
   boarding: '#87CEEB',
+};
+
+export const CYCLE_LABELS: Record<CycleType, string> = {
+  monthly: '每月',
+  weekly: '每周',
+  quarterly: '每季度',
+  yearly: '每年',
+  once: '一次性',
 };

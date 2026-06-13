@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Pet, Expense, Budget, Item, Reminder, Category } from '../types';
+import { Pet, Expense, Budget, Item, Reminder, FixedExpense, ExpenseSplit, Category } from '../types';
 import { loadData, saveData, getCurrentMonth, STORAGE_KEYS } from '../utils/helpers';
 import { mockPets, mockExpenses, mockBudgets, mockItems, mockReminders } from '../data/mockData';
 
@@ -9,6 +9,7 @@ interface AppStore {
   budgets: Budget[];
   items: Item[];
   reminders: Reminder[];
+  fixedExpenses: FixedExpense[];
   selectedPetId: string | null;
   currentMonth: string;
   
@@ -31,6 +32,12 @@ interface AppStore {
   addReminder: (reminder: Omit<Reminder, 'id' | 'created_at'>) => void;
   updateReminder: (id: string, updates: Partial<Reminder>) => void;
   deleteReminder: (id: string) => void;
+  processReminder: (id: string, nextDate?: string) => void;
+  
+  addFixedExpense: (fixedExpense: Omit<FixedExpense, 'id' | 'created_at'>) => void;
+  updateFixedExpense: (id: string, updates: Partial<FixedExpense>) => void;
+  deleteFixedExpense: (id: string) => void;
+  generateFixedExpense: (id: string) => void;
   
   setCurrentMonth: (month: string) => void;
   
@@ -47,6 +54,7 @@ export const useStore = create<AppStore>((set, get) => ({
   budgets: loadData(STORAGE_KEYS.BUDGETS, mockBudgets),
   items: loadData(STORAGE_KEYS.ITEMS, mockItems),
   reminders: loadData(STORAGE_KEYS.REMINDERS, mockReminders),
+  fixedExpenses: loadData(STORAGE_KEYS.FIXED_EXPENSES, []),
   selectedPetId: null,
   currentMonth: getCurrentMonth(),
   
@@ -161,6 +169,71 @@ export const useStore = create<AppStore>((set, get) => ({
     const reminders = get().reminders.filter(r => r.id !== id);
     set({ reminders });
     saveData(STORAGE_KEYS.REMINDERS, reminders);
+  },
+  
+  processReminder: (id, nextDate) => {
+    const reminders = get().reminders.map(r => {
+      if (r.id === id) {
+        const newNextDate = nextDate || r.next_date;
+        return {
+          ...r,
+          is_processed: true,
+          last_processed_date: new Date().toISOString().split('T')[0],
+          next_date: newNextDate,
+        };
+      }
+      return r;
+    });
+    set({ reminders });
+    saveData(STORAGE_KEYS.REMINDERS, reminders);
+  },
+  
+  addFixedExpense: (fixedExpense) => {
+    const newFixedExpense: FixedExpense = {
+      ...fixedExpense,
+      id: generateId(),
+      created_at: new Date().toISOString().split('T')[0],
+    };
+    const fixedExpenses = [...get().fixedExpenses, newFixedExpense];
+    set({ fixedExpenses });
+    saveData(STORAGE_KEYS.FIXED_EXPENSES, fixedExpenses);
+  },
+  
+  updateFixedExpense: (id, updates) => {
+    const fixedExpenses = get().fixedExpenses.map(f => f.id === id ? { ...f, ...updates } : f);
+    set({ fixedExpenses });
+    saveData(STORAGE_KEYS.FIXED_EXPENSES, fixedExpenses);
+  },
+  
+  deleteFixedExpense: (id) => {
+    const fixedExpenses = get().fixedExpenses.filter(f => f.id !== id);
+    set({ fixedExpenses });
+    saveData(STORAGE_KEYS.FIXED_EXPENSES, fixedExpenses);
+  },
+  
+  generateFixedExpense: (id) => {
+    const fixedExpense = get().fixedExpenses.find(f => f.id === id);
+    if (!fixedExpense) return;
+    
+    const today = new Date().toISOString().split('T')[0];
+    const newExpense: Expense = {
+      id: generateId(),
+      amount: fixedExpense.amount,
+      category: fixedExpense.category,
+      pet_id: fixedExpense.pet_id,
+      merchant: fixedExpense.merchant,
+      quantity: 1,
+      remark: `[自动生成] ${fixedExpense.name}`,
+      receipt: '',
+      is_fixed: true,
+      created_at: today,
+      updated_at: today,
+      splits: fixedExpense.splits,
+    };
+    
+    const expenses = [...get().expenses, newExpense];
+    set({ expenses });
+    saveData(STORAGE_KEYS.EXPENSES, expenses);
   },
   
   setCurrentMonth: (month) => set({ currentMonth: month }),

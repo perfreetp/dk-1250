@@ -1,14 +1,16 @@
-import { useState } from 'react';
-import { X, ShoppingCart, Stethoscope, Scissors, Gamepad2, Home } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { X, ShoppingCart, Stethoscope, Scissors, Gamepad2, Home, Upload, Calendar } from 'lucide-react';
 import { useStore } from '../../store/useStore';
-import { Category, CATEGORY_LABELS, CATEGORY_COLORS } from '../../types';
+import { Category, CATEGORY_LABELS, CATEGORY_COLORS, CycleType, CYCLE_LABELS, ExpenseSplit } from '../../types';
 import PetAvatar from '../Common/PetAvatar';
+import { convertFileToBase64 } from '../../utils/helpers';
 
 interface QuickAddFormProps {
   onClose: () => void;
 }
 
 const categories: Category[] = ['food', 'medical', 'beauty', 'toy', 'boarding'];
+const cycleTypes: CycleType[] = ['once', 'monthly', 'weekly', 'quarterly', 'yearly'];
 
 const categoryIcons = {
   food: ShoppingCart,
@@ -19,38 +21,135 @@ const categoryIcons = {
 };
 
 export default function QuickAddForm({ onClose }: QuickAddFormProps) {
-  const { pets, addExpense } = useStore();
+  const { pets, addExpense, addFixedExpense } = useStore();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState<Category>('food');
-  const [petId, setPetId] = useState(pets[0]?.id || '');
+  const [selectedPets, setSelectedPets] = useState<string[]>([pets[0]?.id || '']);
+  const [splits, setSplits] = useState<{ [petId: string]: string }>({});
+  const [splitType, setSplitType] = useState<'equal' | 'custom'>('equal');
   const [merchant, setMerchant] = useState('');
   const [quantity, setQuantity] = useState('1');
   const [remark, setRemark] = useState('');
+  const [receipt, setReceipt] = useState('');
+  const [isFixed, setIsFixed] = useState(false);
+  const [cycleType, setCycleType] = useState<CycleType>('monthly');
+  const [nextGenerateDate, setNextGenerateDate] = useState('');
+  
+  const handlePetToggle = (petId: string) => {
+    if (selectedPets.includes(petId)) {
+      if (selectedPets.length > 1) {
+        setSelectedPets(selectedPets.filter(id => id !== petId));
+        const newSplits = { ...splits };
+        delete newSplits[petId];
+        setSplits(newSplits);
+      }
+    } else {
+      setSelectedPets([...selectedPets, petId]);
+    }
+  };
+  
+  const handleSplitChange = (petId: string, value: string) => {
+    setSplits({ ...splits, [petId]: value });
+  };
+  
+  const handleEqualSplit = () => {
+    const total = parseFloat(amount) || 0;
+    const perPet = (total / selectedPets.length).toFixed(2);
+    const newSplits: { [petId: string]: string } = {};
+    selectedPets.forEach(id => {
+      newSplits[id] = perPet;
+    });
+    setSplits(newSplits);
+  };
+  
+  const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      try {
+        const base64 = await convertFileToBase64(file);
+        setReceipt(base64);
+      } catch (error) {
+        console.error('Failed to upload receipt:', error);
+      }
+    }
+  };
+  
+  const getExpenseSplits = (): ExpenseSplit[] => {
+    if (selectedPets.length === 1) {
+      return [];
+    }
+    
+    if (splitType === 'equal') {
+      const total = parseFloat(amount) || 0;
+      const perPet = total / selectedPets.length;
+      return selectedPets.map(petId => ({
+        pet_id: petId,
+        amount: parseFloat(perPet.toFixed(2)),
+        percentage: 100 / selectedPets.length,
+      }));
+    }
+    
+    return selectedPets.map(petId => {
+      const splitAmount = parseFloat(splits[petId] || '0');
+      const total = parseFloat(amount) || 0;
+      return {
+        pet_id: petId,
+        amount: splitAmount,
+        percentage: total > 0 ? (splitAmount / total) * 100 : 0,
+      };
+    });
+  };
   
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!amount || !petId) return;
+    if (!amount) return;
     
-    addExpense({
+    const expenseData = {
       amount: parseFloat(amount),
       category,
-      pet_id: petId,
+      pet_id: selectedPets[0] || '',
       merchant,
       quantity: parseInt(quantity) || 1,
       remark,
-      receipt: '',
-      is_fixed: false,
+      receipt,
+      is_fixed: isFixed,
+      cycle_type: isFixed ? cycleType : undefined,
+      next_generate_date: isFixed ? nextGenerateDate : undefined,
+      splits: getExpenseSplits(),
       created_at: new Date().toISOString().split('T')[0],
-    });
+    };
     
+    if (isFixed) {
+      addFixedExpense({
+        name: remark || `${CATEGORY_LABELS[category]} - ${merchant}`,
+        amount: parseFloat(amount),
+        category,
+        pet_id: selectedPets[0] || '',
+        merchant,
+        cycle_type: cycleType,
+        next_generate_date: nextGenerateDate,
+        is_active: true,
+        splits: getExpenseSplits(),
+      });
+    }
+    
+    addExpense(expenseData);
     onClose();
   };
+  
+  const totalAllocated = selectedPets.reduce((sum, petId) => {
+    return sum + (parseFloat(splits[petId] || '0') || 0);
+  }, 0);
+  
+  const total = parseFloat(amount) || 0;
   
   return (
     <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4">
       <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+        <div className="sticky top-0 bg-white px-6 py-4 border-b border-gray-100 flex items-center justify-between z-10">
           <h2 className="text-xl font-bold">快速记账</h2>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full">
             <X size={20} />
@@ -66,7 +165,10 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
                 type="number"
                 step="0.01"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                onChange={(e) => {
+                  setAmount(e.target.value);
+                  if (splitType === 'equal') handleEqualSplit();
+                }}
                 placeholder="0.00"
                 className="w-full pl-10 pr-4 py-4 text-3xl font-bold border border-gray-200 rounded-2xl focus:ring-2 focus:ring-primary focus:border-transparent"
                 required
@@ -104,22 +206,129 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
           </div>
           
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">宠物</label>
-            <div className="flex gap-3">
-              {pets.map((pet) => (
-                <button
-                  key={pet.id}
-                  type="button"
-                  onClick={() => setPetId(pet.id)}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${
-                    petId === pet.id ? 'bg-primary text-white' : 'bg-gray-100'
-                  }`}
-                >
-                  <PetAvatar pet={pet} size="sm" />
-                  <span className="font-medium">{pet.name}</span>
-                </button>
-              ))}
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              宠物 {selectedPets.length > 1 && <span className="text-accent">（分摊）</span>}
+            </label>
+            <div className="flex flex-wrap gap-3">
+              {pets.map((pet) => {
+                const isSelected = selectedPets.includes(pet.id);
+                return (
+                  <button
+                    key={pet.id}
+                    type="button"
+                    onClick={() => handlePetToggle(pet.id)}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${
+                      isSelected ? 'bg-primary text-white' : 'bg-gray-100'
+                    }`}
+                  >
+                    <PetAvatar pet={pet} size="sm" />
+                    <span className="font-medium">{pet.name}</span>
+                  </button>
+                );
+              })}
             </div>
+            
+            {selectedPets.length > 1 && (
+              <div className="mt-4 p-4 bg-gray-50 rounded-xl space-y-3">
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSplitType('equal');
+                      handleEqualSplit();
+                    }}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium ${
+                      splitType === 'equal' ? 'bg-primary text-white' : 'bg-white'
+                    }`}
+                  >
+                    平均分摊
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSplitType('custom')}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium ${
+                      splitType === 'custom' ? 'bg-primary text-white' : 'bg-white'
+                    }`}
+                  >
+                    自定义金额
+                  </button>
+                </div>
+                
+                {selectedPets.map((petId) => {
+                  const pet = pets.find(p => p.id === petId);
+                  return (
+                    <div key={petId} className="flex items-center gap-3">
+                      <span className="text-xl">{pet?.avatar}</span>
+                      <span className="flex-1 text-sm">{pet?.name}</span>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">¥</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={splits[petId] || ''}
+                          onChange={(e) => handleSplitChange(petId, e.target.value)}
+                          placeholder="0.00"
+                          className="w-28 pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm text-right focus:ring-2 focus:ring-primary focus:border-transparent"
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+                
+                <div className="flex justify-between text-sm">
+                  <span>合计</span>
+                  <span className={totalAllocated === total ? 'text-green-500' : 'text-accent'}>
+                    ¥{totalAllocated.toFixed(2)} / ¥{total.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isFixed}
+                  onChange={(e) => setIsFixed(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                <Calendar size={16} />
+                <span>设为固定开销</span>
+              </label>
+            </label>
+            
+            {isFixed && (
+              <div className="mt-3 p-4 bg-gray-50 rounded-xl space-y-3">
+                <div>
+                  <label className="block text-sm text-gray-600 mb-2">周期</label>
+                  <div className="flex gap-2">
+                    {cycleTypes.map((cycle) => (
+                      <button
+                        key={cycle}
+                        type="button"
+                        onClick={() => setCycleType(cycle)}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+                          cycleType === cycle ? 'bg-primary text-white' : 'bg-white'
+                        }`}
+                      >
+                        {CYCLE_LABELS[cycle]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-600 mb-2">下次生成日期</label>
+                  <input
+                    type="date"
+                    value={nextGenerateDate}
+                    onChange={(e) => setNextGenerateDate(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
+                  />
+                </div>
+              </div>
+            )}
           </div>
           
           <div className="grid grid-cols-2 gap-4">
@@ -151,9 +360,46 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
               value={remark}
               onChange={(e) => setRemark(e.target.value)}
               placeholder="添加备注..."
-              rows={3}
+              rows={2}
               className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-transparent resize-none"
             />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">票据照片</label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleReceiptUpload}
+              className="hidden"
+            />
+            
+            {receipt ? (
+              <div className="relative">
+                <img
+                  src={receipt}
+                  alt="Receipt"
+                  className="w-full h-40 object-cover rounded-xl"
+                />
+                <button
+                  type="button"
+                  onClick={() => setReceipt('')}
+                  className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full h-24 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center gap-2 text-gray-400 hover:border-primary hover:text-primary transition-colors"
+              >
+                <Upload size={24} />
+                <span className="text-sm">点击上传票据照片</span>
+              </button>
+            )}
           </div>
           
           <button

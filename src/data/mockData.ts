@@ -295,6 +295,7 @@ export const mockReminders: Reminder[] = [
     type: 'vaccine',
     next_date: formatDate(subDays(now, -7)),
     remind_days: 7,
+    is_processed: false,
     created_at: formatDate(subDays(now, 30)),
   },
   {
@@ -303,6 +304,7 @@ export const mockReminders: Reminder[] = [
     type: 'vaccine',
     next_date: formatDate(subDays(now, -3)),
     remind_days: 3,
+    is_processed: false,
     created_at: formatDate(subDays(now, 27)),
   },
   {
@@ -311,6 +313,7 @@ export const mockReminders: Reminder[] = [
     type: 'deworming',
     next_date: formatDate(subDays(now, -14)),
     remind_days: 7,
+    is_processed: false,
     created_at: formatDate(subDays(now, 16)),
   },
   {
@@ -319,6 +322,7 @@ export const mockReminders: Reminder[] = [
     type: 'checkup',
     next_date: formatDate(subDays(now, -30)),
     remind_days: 7,
+    is_processed: false,
     created_at: formatDate(subDays(now, 0)),
   },
 ];

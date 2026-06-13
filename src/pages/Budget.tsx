@@ -1,12 +1,11 @@
 import { useState, useMemo, useEffect } from 'react';
-import { AlertTriangle, Calendar, Settings, Bell, X } from 'lucide-react';
-import { format, differenceInDays } from 'date-fns';
+import { AlertTriangle, Calendar, Settings, Bell, X, Check, RefreshCw } from 'lucide-react';
+import { format, differenceInDays, addMonths, addWeeks, addYears } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { useStore } from '../store/useStore';
-import { getMonthlyTotal, getCategoryTotal, formatCurrency, detectAnomaly } from '../utils/helpers';
-import { Category, CATEGORY_LABELS, CATEGORY_COLORS, ReminderType } from '../types';
+import { getMonthlyTotal, getCategoryTotal, formatCurrency, calculateSplitAmount, detectAnomaly } from '../utils/helpers';
+import { Category, CATEGORY_LABELS, CATEGORY_COLORS, ReminderType, CycleType } from '../types';
 import BudgetProgress from '../components/Common/BudgetProgress';
-import StatCard from '../components/Common/StatCard';
 
 const categories: Category[] = ['food', 'medical', 'beauty', 'toy', 'boarding'];
 
@@ -17,9 +16,19 @@ const reminderTypeLabels: Record<ReminderType, string> = {
   other: '其他',
 };
 
+const reminderColors: Record<ReminderType, string> = {
+  vaccine: '#FF6B6B',
+  deworming: '#FFB347',
+  checkup: '#98D8C8',
+  other: '#DDA0DD',
+};
+
 export default function BudgetPage() {
-  const { pets, expenses, budgets, reminders, currentMonth, addBudget, updateBudget } = useStore();
+  const { pets, expenses, budgets, reminders, currentMonth, addBudget, updateBudget, processReminder } = useStore();
   const [showBudgetModal, setShowBudgetModal] = useState(false);
+  const [showReminderModal, setShowReminderModal] = useState(false);
+  const [editingReminder, setEditingReminder] = useState<string | null>(null);
+  const [newReminderDate, setNewReminderDate] = useState('');
   const [newBudget, setNewBudget] = useState({
     total: 3000,
     categoryBudgets: {
@@ -59,8 +68,10 @@ export default function BudgetPage() {
         const daysUntil = differenceInDays(nextDate, today);
         return { ...r, pet, daysUntil };
       })
-      .filter(r => r.daysUntil <= r.remind_days)
-      .sort((a, b) => a.daysUntil - b.daysUntil);
+      .sort((a, b) => {
+        if (a.is_processed !== b.is_processed) return a.is_processed ? 1 : -1;
+        return a.daysUntil - b.daysUntil;
+      });
   }, [reminders, pets]);
   
   const handleSaveBudget = () => {
@@ -77,6 +88,30 @@ export default function BudgetPage() {
       });
     }
     setShowBudgetModal(false);
+  };
+  
+  const handleProcessReminder = (id: string) => {
+    processReminder(id, newReminderDate);
+    setShowReminderModal(false);
+    setEditingReminder(null);
+    setNewReminderDate('');
+  };
+  
+  const openReminderModal = (id: string) => {
+    setEditingReminder(id);
+    const reminder = reminders.find(r => r.id === id);
+    if (reminder) {
+      const nextDate = new Date(reminder.next_date);
+      if (reminder.type === 'vaccine') {
+        nextDate.setFullYear(nextDate.getFullYear() + 1);
+      } else if (reminder.type === 'deworming') {
+        nextDate.setMonth(nextDate.getMonth() + 1);
+      } else {
+        nextDate.setMonth(nextDate.getMonth() + 6);
+      }
+      setNewReminderDate(format(nextDate, 'yyyy-MM-dd'));
+    }
+    setShowReminderModal(true);
   };
   
   useEffect(() => {
@@ -176,46 +211,6 @@ export default function BudgetPage() {
         </div>
       </div>
       
-      {upcomingReminders.length > 0 && (
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center gap-2 mb-4">
-            <Calendar size={20} className="text-primary" />
-            <h2 className="text-lg font-bold">即将到期</h2>
-          </div>
-          <div className="space-y-3">
-            {upcomingReminders.slice(0, 4).map((reminder) => (
-              <div
-                key={reminder.id}
-                className={`p-4 rounded-xl ${
-                  reminder.daysUntil <= 3 ? 'bg-accent/10' : 'bg-gray-50'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="text-2xl">{reminder.pet?.avatar}</span>
-                    <div>
-                      <p className="font-medium">
-                        {reminder.pet?.name} - {reminderTypeLabels[reminder.type]}
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        下次: {format(new Date(reminder.next_date), 'yyyy年MM月dd日', { locale: zhCN })}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className={`font-bold ${
-                      reminder.daysUntil <= 0 ? 'text-accent' : reminder.daysUntil <= 3 ? 'text-secondary' : 'text-gray-600'
-                    }`}>
-                      {reminder.daysUntil <= 0 ? '已到期' : `${reminder.daysUntil}天后`}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      
       {anomalies.length > 0 && (
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
           <div className="flex items-center gap-2 mb-4">
@@ -225,20 +220,101 @@ export default function BudgetPage() {
           <div className="space-y-3">
             {anomalies.map((expense) => {
               const pet = pets.find(p => p.id === expense.pet_id);
+              const splitTotal = Object.values(calculateSplitAmount(expense)).reduce((s, v) => s + v, 0);
               return (
                 <div key={expense.id} className="p-4 rounded-xl bg-accent/10 border border-accent/20">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="font-medium">
-                        {pet?.avatar} {pet?.name} - {CATEGORY_LABELS[expense.category]}
-                      </p>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-lg">{pet?.avatar}</span>
+                        <span className="font-medium">{pet?.name}</span>
+                        <span className="text-gray-300">•</span>
+                        <span style={{ color: CATEGORY_COLORS[expense.category] }}>
+                          {CATEGORY_LABELS[expense.category]}
+                        </span>
+                      </div>
                       <p className="text-sm text-gray-500">{expense.remark || expense.merchant}</p>
                     </div>
-                    <p className="text-lg font-bold text-accent">{formatCurrency(expense.amount)}</p>
+                    <p className="text-lg font-bold text-accent">{formatCurrency(splitTotal)}</p>
                   </div>
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+      
+      {upcomingReminders.length > 0 && (
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+          <div className="flex items-center gap-2 mb-4">
+            <Calendar size={20} className="text-primary" />
+            <h2 className="text-lg font-bold">到期提醒</h2>
+          </div>
+          <div className="space-y-3">
+            {upcomingReminders.map((reminder) => (
+              <div
+                key={reminder.id}
+                className={`p-4 rounded-xl ${
+                  reminder.is_processed 
+                    ? 'bg-gray-50 opacity-60' 
+                    : reminder.daysUntil <= 3 
+                      ? 'bg-accent/10 border border-accent/20' 
+                      : 'bg-gray-50'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-10 h-10 rounded-xl flex items-center justify-center text-lg"
+                      style={{ backgroundColor: `${reminderColors[reminder.type]}20` }}
+                    >
+                      {reminder.type === 'vaccine' ? '💉' : reminder.type === 'deworming' ? '🛡️' : '🩺'}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium">
+                          {reminder.pet?.avatar} {reminder.pet?.name} - {reminderTypeLabels[reminder.type]}
+                        </p>
+                        {reminder.is_processed && (
+                          <span className="text-xs bg-green-100 text-green-600 px-2 py-0.5 rounded-full">
+                            已处理
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-500">
+                        下次: {format(new Date(reminder.next_date), 'yyyy年MM月dd日', { locale: zhCN })}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <p className={`font-bold ${
+                      reminder.is_processed 
+                        ? 'text-gray-400' 
+                        : reminder.daysUntil <= 0 
+                          ? 'text-accent' 
+                          : reminder.daysUntil <= 3 
+                            ? 'text-secondary' 
+                            : 'text-gray-600'
+                    }`}>
+                      {reminder.is_processed 
+                        ? '已处理' 
+                        : reminder.daysUntil <= 0 
+                          ? '已到期' 
+                          : `${reminder.daysUntil}天后`}
+                    </p>
+                    {!reminder.is_processed && (
+                      <button
+                        onClick={() => openReminderModal(reminder.id)}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-primary text-white text-sm rounded-lg hover:bg-primary-600 transition-colors"
+                      >
+                        <Check size={14} />
+                        <span>处理</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -303,6 +379,44 @@ export default function BudgetPage() {
                 className="w-full py-4 bg-primary text-white font-bold rounded-2xl hover:bg-primary-600 transition-colors"
               >
                 保存预算
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {showReminderModal && editingReminder && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+              <h2 className="text-xl font-bold">标记已处理</h2>
+              <button
+                onClick={() => {
+                  setShowReminderModal(false);
+                  setEditingReminder(null);
+                }}
+                className="p-2 hover:bg-gray-100 rounded-full"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-4">
+              <p className="text-gray-600">
+                设置下次提醒时间：
+              </p>
+              <input
+                type="date"
+                value={newReminderDate}
+                onChange={(e) => setNewReminderDate(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-transparent"
+              />
+              
+              <button
+                onClick={() => handleProcessReminder(editingReminder)}
+                className="w-full py-4 bg-primary text-white font-bold rounded-2xl hover:bg-primary-600 transition-colors"
+              >
+                确认处理
               </button>
             </div>
           </div>
