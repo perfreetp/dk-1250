@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react';
-import { Plus, TrendingUp, Calendar, RefreshCw } from 'lucide-react';
-import { format, differenceInDays, addDays } from 'date-fns';
+import { useState, useMemo, useEffect } from 'react';
+import { Plus, TrendingUp, Calendar, AlertCircle, Check, X } from 'lucide-react';
+import { format, differenceInDays } from 'date-fns';
 import { useStore } from '../store/useStore';
-import { getMonthlyTotal, getCategoryTotal, formatCurrency, getPetSplitAmount } from '../utils/helpers';
+import { getMonthlyTotal, getCategoryTotal, formatCurrency, getPetSplitAmount, getDaysUntil } from '../utils/helpers';
 import { Category, CATEGORY_LABELS } from '../types';
 import ExpenseCard from '../components/Common/ExpenseCard';
 import PetAvatar from '../components/Common/PetAvatar';
@@ -13,8 +13,12 @@ import QuickAddForm from '../components/Forms/QuickAddForm';
 const categories: Category[] = ['food', 'medical', 'beauty', 'toy', 'boarding'];
 
 export default function HomePage() {
-  const { pets, expenses, budgets, fixedExpenses, selectedPetId, setSelectedPet, currentMonth, generateFixedExpense, updateFixedExpense } = useStore();
+  const { pets, expenses, budgets, fixedExpenses, pendingBills, selectedPetId, setSelectedPet, currentMonth, checkAndGeneratePendingBills, confirmPendingBill, deletePendingBill } = useStore();
   const [showQuickAdd, setShowQuickAdd] = useState(false);
+  
+  useEffect(() => {
+    checkAndGeneratePendingBills();
+  }, [checkAndGeneratePendingBills]);
   
   const monthlyTotal = useMemo(() => getMonthlyTotal(expenses, currentMonth, selectedPetId), [expenses, currentMonth, selectedPetId]);
   
@@ -56,24 +60,6 @@ export default function HomePage() {
       .filter(f => f.daysUntil <= 7)
       .sort((a, b) => a.daysUntil - b.daysUntil);
   }, [fixedExpenses]);
-  
-  const handleGenerateFixedExpense = (id: string) => {
-    generateFixedExpense(id);
-    const fixed = fixedExpenses.find(f => f.id === id);
-    if (fixed) {
-      const nextDate = new Date(fixed.next_generate_date);
-      if (fixed.cycle_type === 'weekly') {
-        nextDate.setDate(nextDate.getDate() + 7);
-      } else if (fixed.cycle_type === 'monthly') {
-        nextDate.setMonth(nextDate.getMonth() + 1);
-      } else if (fixed.cycle_type === 'quarterly') {
-        nextDate.setMonth(nextDate.getMonth() + 3);
-      } else if (fixed.cycle_type === 'yearly') {
-        nextDate.setFullYear(nextDate.getFullYear() + 1);
-      }
-      updateFixedExpense(id, { next_generate_date: format(nextDate, 'yyyy-MM-dd') });
-    }
-  };
   
   return (
     <div className="space-y-6">
@@ -170,22 +156,62 @@ export default function HomePage() {
                       </p>
                     </div>
                   </div>
+                  <span className="font-bold">{formatCurrency(fixed.amount)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      
+      {pendingBills.length > 0 && (
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 rounded-2xl p-6 shadow-sm border border-amber-200">
+          <div className="flex items-center gap-2 mb-4">
+            <AlertCircle size={20} className="text-amber-500" />
+            <h2 className="text-lg font-bold">待确认账单</h2>
+            <span className="ml-auto text-sm text-amber-600 bg-amber-100 px-2 py-1 rounded-full">
+              {pendingBills.length} 条待处理
+            </span>
+          </div>
+          <div className="space-y-3">
+            {pendingBills.map((bill) => {
+              const pet = pets.find(p => p.id === bill.pet_id);
+              const daysUntil = getDaysUntil(bill.scheduled_date);
+              return (
+                <div key={bill.id} className="flex items-center justify-between p-4 bg-white rounded-xl shadow-sm">
                   <div className="flex items-center gap-3">
-                    <span className="font-bold">{formatCurrency(fixed.amount)}</span>
-                    {fixed.daysUntil <= 0 && (
-                      <button
-                        onClick={() => handleGenerateFixedExpense(fixed.id)}
-                        className="flex items-center gap-1 px-3 py-1.5 bg-primary text-white text-sm rounded-lg hover:bg-primary-600 transition-colors"
-                      >
-                        <RefreshCw size={14} />
-                        <span>生成</span>
-                      </button>
-                    )}
+                    <span className="text-2xl">{pet?.avatar}</span>
+                    <div>
+                      <p className="font-medium">{bill.fixed_expense_name}</p>
+                      <p className="text-sm text-gray-500">
+                        {daysUntil <= 0 ? '今天' : `${daysUntil}天后`} · {CATEGORY_LABELS[bill.category]}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-bold text-lg">{formatCurrency(bill.amount)}</span>
+                    <button
+                      onClick={() => confirmPendingBill(bill.id)}
+                      className="p-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                      title="确认入账"
+                    >
+                      <Check size={18} />
+                    </button>
+                    <button
+                      onClick={() => deletePendingBill(bill.id)}
+                      className="p-2 bg-gray-200 text-gray-600 rounded-lg hover:bg-gray-300 transition-colors"
+                      title="取消"
+                    >
+                      <X size={18} />
+                    </button>
                   </div>
                 </div>
               );
             })}
           </div>
+          <p className="text-xs text-amber-600 mt-3">
+            确认后会自动计入本月消费，下次日期将自动顺延
+          </p>
         </div>
       )}
       
@@ -259,6 +285,7 @@ export default function HomePage() {
                 expense={expense}
                 pet={pets.find(p => p.id === expense.pet_id)}
                 pets={pets}
+                filterPetId={selectedPetId}
               />
             ))}
           </div>

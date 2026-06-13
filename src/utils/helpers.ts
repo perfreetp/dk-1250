@@ -1,5 +1,5 @@
-import { format } from 'date-fns';
-import { Expense, Category, Budget, ExpenseSplit } from '../types';
+import { format, addDays, addWeeks, addMonths, addYears } from 'date-fns';
+import { Expense, Category, Budget, ExpenseSplit, CycleType } from '../types';
 
 const STORAGE_KEYS = {
   PETS: 'pet_expense_tracker_pets',
@@ -8,6 +8,7 @@ const STORAGE_KEYS = {
   ITEMS: 'pet_expense_tracker_items',
   REMINDERS: 'pet_expense_tracker_reminders',
   FIXED_EXPENSES: 'pet_expense_tracker_fixed_expenses',
+  PENDING_BILLS: 'pet_expense_tracker_pending_bills',
 };
 
 export const loadData = <T>(key: string, defaultValue: T): T => {
@@ -173,6 +174,45 @@ export const convertFileToBase64 = (file: File): Promise<string> => {
     reader.onload = () => resolve(reader.result as string);
     reader.onerror = error => reject(error);
   });
+};
+
+export const calculateNextGenerateDate = (currentDate: string, cycleType: CycleType): string => {
+  const date = new Date(currentDate);
+  let nextDate: Date;
+  
+  switch (cycleType) {
+    case 'weekly':
+      nextDate = addWeeks(date, 1);
+      break;
+    case 'monthly':
+      nextDate = addMonths(date, 1);
+      break;
+    case 'quarterly':
+      nextDate = addMonths(date, 3);
+      break;
+    case 'yearly':
+      nextDate = addYears(date, 1);
+      break;
+    case 'once':
+    default:
+      return currentDate;
+  }
+  
+  return format(nextDate, 'yyyy-MM-dd');
+};
+
+export const isDateReached = (scheduledDate: string): boolean => {
+  const today = new Date();
+  const scheduled = new Date(scheduledDate);
+  return today >= scheduled;
+};
+
+export const getDaysUntil = (dateStr: string): number => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const targetDate = new Date(dateStr);
+  targetDate.setHours(0, 0, 0, 0);
+  return Math.ceil((targetDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 };
 
 export { STORAGE_KEYS };

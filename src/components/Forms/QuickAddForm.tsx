@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { X, ShoppingCart, Stethoscope, Scissors, Gamepad2, Home, Upload, Calendar } from 'lucide-react';
+import { X, ShoppingCart, Stethoscope, Scissors, Gamepad2, Home, Upload, Calendar, AlertCircle } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { Category, CATEGORY_LABELS, CATEGORY_COLORS, CycleType, CYCLE_LABELS, ExpenseSplit } from '../../types';
 import PetAvatar from '../Common/PetAvatar';
@@ -38,6 +38,21 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
   const [cycleType, setCycleType] = useState<CycleType>('monthly');
   const [nextGenerateDate, setNextGenerateDate] = useState('');
   
+  const total = parseFloat(amount) || 0;
+  
+  const totalPercentage = selectedPets.reduce((sum, petId) => {
+    return sum + (parseFloat(percentages[petId] || '0') || 0);
+  }, 0);
+  
+  const totalAmount = selectedPets.reduce((sum, petId) => {
+    return sum + (parseFloat(splits[petId] || '0') || 0);
+  }, 0);
+  
+  const isPercentageValid = Math.abs(totalPercentage - 100) < 0.01;
+  const isAmountValid = Math.abs(totalAmount - total) < 0.01;
+  const isSplitValid = selectedPets.length <= 1 || (splitType === 'equal') || 
+    (splitType === 'percentage' ? isPercentageValid : isAmountValid);
+  
   const handlePetToggle = (petId: string) => {
     if (selectedPets.includes(petId)) {
       if (selectedPets.length > 1) {
@@ -63,7 +78,6 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
   };
   
   const handleEqualSplit = () => {
-    const total = parseFloat(amount) || 0;
     const perPet = (total / selectedPets.length).toFixed(2);
     const newSplits: { [petId: string]: string } = {};
     selectedPets.forEach(id => {
@@ -86,11 +100,9 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
   };
   
   const getExpenseSplits = (): ExpenseSplit[] => {
-    if (selectedPets.length === 1) {
+    if (selectedPets.length <= 1) {
       return [];
     }
-    
-    const total = parseFloat(amount) || 0;
     
     if (splitType === 'equal') {
       const perPet = total / selectedPets.length;
@@ -126,7 +138,11 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!amount) return;
+    if (!amount || parseFloat(amount) <= 0) return;
+    
+    if (selectedPets.length > 1 && !isSplitValid) {
+      return;
+    }
     
     const expenseData = {
       amount: parseFloat(amount),
@@ -145,7 +161,7 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
     
     if (isFixed) {
       addFixedExpense({
-        name: remark || `${CATEGORY_LABELS[category]} - ${merchant}`,
+        name: remark || `${CATEGORY_LABELS[category]} - ${merchant}` || '固定支出',
         amount: parseFloat(amount),
         category,
         pet_id: selectedPets[0] || '',
@@ -160,19 +176,6 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
     addExpense(expenseData);
     onClose();
   };
-  
-  const totalAllocated = selectedPets.reduce((sum, petId) => {
-    if (splitType === 'percentage') {
-      const pct = parseFloat(percentages[petId] || '0');
-      return sum + pct;
-    }
-    return sum + (parseFloat(splits[petId] || '0') || 0);
-  }, 0);
-  
-  const total = parseFloat(amount) || 0;
-  const totalAmountDisplay = splitType === 'percentage' 
-    ? `${totalAllocated.toFixed(1)}%`
-    : `¥${totalAllocated.toFixed(2)}`;
   
   return (
     <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4">
@@ -339,12 +342,32 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
                   );
                 })}
                 
-                <div className="flex justify-between text-sm">
-                  <span>合计</span>
-                  <span className={Math.abs(totalAllocated - (splitType === 'percentage' ? 100 : total)) < 0.01 ? 'text-green-500' : 'text-accent'}>
-                    {totalAmountDisplay} / {splitType === 'percentage' ? '100%' : `¥${total.toFixed(2)}`}
+                <div className={`flex justify-between text-sm p-2 rounded-lg ${
+                  splitType === 'percentage' 
+                    ? (isPercentageValid ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700')
+                    : (isAmountValid ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700')
+                }`}>
+                  <span className="flex items-center gap-1">
+                    <AlertCircle size={14} />
+                    合计
+                  </span>
+                  <span className="font-bold">
+                    {splitType === 'percentage' 
+                      ? `${totalPercentage.toFixed(1)}% / 100%`
+                      : `¥${totalAmount.toFixed(2)} / ¥${total.toFixed(2)}`
+                    }
                   </span>
                 </div>
+                
+                {!isSplitValid && (
+                  <p className="text-xs text-red-600 flex items-center gap-1">
+                    <AlertCircle size={12} />
+                    {splitType === 'percentage' 
+                      ? '百分比合计必须等于100%'
+                      : '各宠物金额合计必须等于总金额'
+                    }
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -468,9 +491,14 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
           
           <button
             type="submit"
-            className="w-full py-4 bg-primary text-white font-bold rounded-2xl hover:bg-primary-600 transition-colors"
+            disabled={selectedPets.length > 1 && !isSplitValid}
+            className={`w-full py-4 font-bold rounded-2xl transition-colors ${
+              selectedPets.length > 1 && !isSplitValid
+                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                : 'bg-primary text-white hover:bg-primary-600'
+            }`}
           >
-            保存记录
+            {selectedPets.length > 1 && !isSplitValid ? '请先完成分摊分配' : '保存记录'}
           </button>
         </form>
       </div>

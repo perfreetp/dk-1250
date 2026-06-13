@@ -1,9 +1,9 @@
 import { useState, useMemo, useEffect } from 'react';
-import { AlertTriangle, Calendar, Settings, Bell, X, Check, RefreshCw } from 'lucide-react';
-import { format, differenceInDays, addMonths, addWeeks, addYears } from 'date-fns';
+import { AlertTriangle, Calendar, Settings, Bell, X, Check, AlertCircle } from 'lucide-react';
+import { format, differenceInDays } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { useStore } from '../store/useStore';
-import { getMonthlyTotal, getCategoryTotal, formatCurrency, getPetSplitAmount } from '../utils/helpers';
+import { getMonthlyTotal, getCategoryTotal, formatCurrency, getPetSplitAmount, getDaysUntil } from '../utils/helpers';
 import { Category, CATEGORY_LABELS, CATEGORY_COLORS, ReminderType } from '../types';
 import BudgetProgress from '../components/Common/BudgetProgress';
 
@@ -24,7 +24,7 @@ const reminderColors: Record<ReminderType, string> = {
 };
 
 export default function BudgetPage() {
-  const { pets, expenses, budgets, reminders, fixedExpenses, currentMonth, addBudget, updateBudget, processReminder, generateFixedExpense, updateFixedExpense } = useStore();
+  const { pets, expenses, budgets, reminders, fixedExpenses, pendingBills, currentMonth, addBudget, updateBudget, processReminder, confirmPendingBill, deletePendingBill, checkAndGeneratePendingBills } = useStore();
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [showReminderModal, setShowReminderModal] = useState(false);
   const [editingReminder, setEditingReminder] = useState<string | null>(null);
@@ -39,6 +39,10 @@ export default function BudgetPage() {
       boarding: 900,
     } as Record<Category, number>,
   });
+  
+  useEffect(() => {
+    checkAndGeneratePendingBills();
+  }, [checkAndGeneratePendingBills]);
   
   const monthlyTotal = useMemo(() => getMonthlyTotal(expenses, currentMonth), [expenses, currentMonth]);
   
@@ -111,24 +115,6 @@ export default function BudgetPage() {
     setShowReminderModal(false);
     setEditingReminder(null);
     setNewReminderDate('');
-  };
-  
-  const handleGenerateFixedExpense = (id: string) => {
-    generateFixedExpense(id);
-    const fixed = fixedExpenses.find(f => f.id === id);
-    if (fixed) {
-      const nextDate = new Date(fixed.next_generate_date);
-      if (fixed.cycle_type === 'weekly') {
-        nextDate.setDate(nextDate.getDate() + 7);
-      } else if (fixed.cycle_type === 'monthly') {
-        nextDate.setMonth(nextDate.getMonth() + 1);
-      } else if (fixed.cycle_type === 'quarterly') {
-        nextDate.setMonth(nextDate.getMonth() + 3);
-      } else if (fixed.cycle_type === 'yearly') {
-        nextDate.setFullYear(nextDate.getFullYear() + 1);
-      }
-      updateFixedExpense(id, { next_generate_date: format(nextDate, 'yyyy-MM-dd') });
-    }
   };
   
   const openReminderModal = (id: string) => {
@@ -245,7 +231,57 @@ export default function BudgetPage() {
         </div>
       </div>
       
-      {upcomingFixedExpenses.length > 0 && (
+      {pendingBills.length > 0 && (
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 rounded-2xl p-6 shadow-sm border border-amber-200">
+          <div className="flex items-center gap-2 mb-4">
+            <AlertCircle size={20} className="text-amber-500" />
+            <h2 className="text-lg font-bold">待确认固定账单</h2>
+            <span className="ml-auto text-sm text-amber-600 bg-amber-100 px-2 py-1 rounded-full">
+              {pendingBills.length} 条待处理
+            </span>
+          </div>
+          <div className="space-y-3">
+            {pendingBills.map((bill) => {
+              const pet = pets.find(p => p.id === bill.pet_id);
+              const daysUntil = getDaysUntil(bill.scheduled_date);
+              return (
+                <div key={bill.id} className="flex items-center justify-between p-4 bg-white rounded-xl shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">{pet?.avatar}</span>
+                    <div>
+                      <p className="font-medium">{bill.fixed_expense_name}</p>
+                      <p className="text-sm text-gray-500">
+                        {daysUntil <= 0 ? '今天到期' : `${daysUntil}天后`} · {CATEGORY_LABELS[bill.category]}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-bold text-lg">{formatCurrency(bill.amount)}</span>
+                    <button
+                      onClick={() => confirmPendingBill(bill.id)}
+                      className="flex items-center gap-1 px-3 py-1.5 bg-green-500 text-white text-sm rounded-lg hover:bg-green-600 transition-colors"
+                    >
+                      <Check size={14} />
+                      <span>确认</span>
+                    </button>
+                    <button
+                      onClick={() => deletePendingBill(bill.id)}
+                      className="p-1.5 bg-gray-200 text-gray-600 rounded-lg hover:bg-gray-300 transition-colors"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-xs text-amber-600 mt-3">
+            确认后自动计入本月消费，下次日期将顺延
+          </p>
+        </div>
+      )}
+      
+      {upcomingFixedExpenses.length > 0 && pendingBills.length === 0 && (
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
           <div className="flex items-center gap-2 mb-4">
             <Calendar size={20} className="text-primary" />
@@ -265,18 +301,7 @@ export default function BudgetPage() {
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="font-bold">{formatCurrency(fixed.amount)}</span>
-                    {fixed.daysUntil <= 0 && (
-                      <button
-                        onClick={() => handleGenerateFixedExpense(fixed.id)}
-                        className="flex items-center gap-1 px-3 py-1.5 bg-primary text-white text-sm rounded-lg hover:bg-primary-600 transition-colors"
-                      >
-                        <RefreshCw size={14} />
-                        <span>生成</span>
-                      </button>
-                    )}
-                  </div>
+                  <span className="font-bold">{formatCurrency(fixed.amount)}</span>
                 </div>
               );
             })}

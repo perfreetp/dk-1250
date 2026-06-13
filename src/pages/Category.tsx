@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useStore } from '../store/useStore';
-import { getCategoryTotal, formatCurrency, getPetSplitAmount } from '../utils/helpers';
+import { getCategoryTotal, formatCurrency, getPetSplitAmount, calculateSplitAmount } from '../utils/helpers';
 import { Category, CATEGORY_LABELS, CATEGORY_COLORS } from '../types';
 import CategoryIcon from '../components/Common/CategoryIcon';
 import ExpenseCard from '../components/Common/ExpenseCard';
@@ -47,8 +47,8 @@ export default function CategoryPage() {
         if (selectedPetId) {
           return sum + getPetSplitAmount(e, selectedPetId);
         }
-        const splits = Object.values(getPetSplitAmount(e, e.pet_id));
-        return sum + splits.reduce((s, a) => s + a, 0);
+        const splits = calculateSplitAmount(e);
+        return sum + Object.values(splits).reduce((s, a) => s + a, 0);
       }, 0);
       return { category: cat, amount: total };
     });
@@ -99,7 +99,15 @@ export default function CategoryPage() {
       <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
         <h2 className="text-lg font-bold mb-4">支出占比</h2>
         {chartData.length > 0 ? (
-          <CategoryPieChart data={chartData.map(c => ({ category: c.category, value: c.amount }))} />
+          <>
+            <CategoryPieChart data={chartData.map(c => ({ category: c.category, value: c.amount }))} />
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">筛选记录数</span>
+                <span className="font-bold">{filteredExpenses.length} 笔</span>
+              </div>
+            </div>
+          </>
         ) : (
           <div className="h-64 flex items-center justify-center text-gray-400">
             暂无数据
@@ -172,6 +180,7 @@ export default function CategoryPage() {
                 expense={expense}
                 pet={pets.find(p => p.id === expense.pet_id)}
                 pets={pets}
+                filterPetId={selectedPetId}
               />
             ))}
           </div>

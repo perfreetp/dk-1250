@@ -30,6 +30,8 @@ export interface Expense {
   remark: string;
   receipt: string;
   is_fixed: boolean;
+  fixed_expense_id?: string;
+  is_confirmed?: boolean;
   cycle_type?: CycleType;
   next_generate_date?: string;
   splits?: ExpenseSplit[];
@@ -77,6 +79,20 @@ export interface FixedExpense {
   cycle_type: CycleType;
   next_generate_date: string;
   is_active: boolean;
+  last_generated_date?: string;
+  splits?: ExpenseSplit[];
+  created_at: string;
+}
+
+export interface PendingBill {
+  id: string;
+  fixed_expense_id: string;
+  fixed_expense_name: string;
+  amount: number;
+  category: Category;
+  pet_id: string;
+  merchant: string;
+  scheduled_date: string;
   splits?: ExpenseSplit[];
   created_at: string;
 }
@@ -88,6 +104,7 @@ export interface AppState {
   items: Item[];
   reminders: Reminder[];
   fixedExpenses: FixedExpense[];
+  pendingBills: PendingBill[];
   selectedPetId: string | null;
   currentMonth: string;
 }

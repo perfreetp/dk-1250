@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { Pet, Expense, Budget, Item, Reminder, FixedExpense, ExpenseSplit, Category } from '../types';
-import { loadData, saveData, getCurrentMonth, STORAGE_KEYS } from '../utils/helpers';
+import { Pet, Expense, Budget, Item, Reminder, FixedExpense, ExpenseSplit, Category, PendingBill } from '../types';
+import { loadData, saveData, getCurrentMonth, STORAGE_KEYS, calculateNextGenerateDate, isDateReached } from '../utils/helpers';
 import { mockPets, mockExpenses, mockBudgets, mockItems, mockReminders } from '../data/mockData';
 
 interface AppStore {
@@ -10,6 +10,7 @@ interface AppStore {
   items: Item[];
   reminders: Reminder[];
   fixedExpenses: FixedExpense[];
+  pendingBills: PendingBill[];
   selectedPetId: string | null;
   currentMonth: string;
   
@@ -37,7 +38,11 @@ interface AppStore {
   addFixedExpense: (fixedExpense: Omit<FixedExpense, 'id' | 'created_at'>) => void;
   updateFixedExpense: (id: string, updates: Partial<FixedExpense>) => void;
   deleteFixedExpense: (id: string) => void;
-  generateFixedExpense: (id: string) => void;
+  
+  addPendingBill: (bill: Omit<PendingBill, 'id' | 'created_at'>) => void;
+  confirmPendingBill: (id: string) => void;
+  deletePendingBill: (id: string) => void;
+  checkAndGeneratePendingBills: () => void;
   
   setCurrentMonth: (month: string) => void;
   
@@ -55,6 +60,7 @@ export const useStore = create<AppStore>((set, get) => ({
   items: loadData(STORAGE_KEYS.ITEMS, mockItems),
   reminders: loadData(STORAGE_KEYS.REMINDERS, mockReminders),
   fixedExpenses: loadData(STORAGE_KEYS.FIXED_EXPENSES, []),
+  pendingBills: loadData(STORAGE_KEYS.PENDING_BILLS, []),
   selectedPetId: null,
   currentMonth: getCurrentMonth(),
   
@@ -211,29 +217,98 @@ export const useStore = create<AppStore>((set, get) => ({
     saveData(STORAGE_KEYS.FIXED_EXPENSES, fixedExpenses);
   },
   
-  generateFixedExpense: (id) => {
-    const fixedExpense = get().fixedExpenses.find(f => f.id === id);
-    if (!fixedExpense) return;
+  addPendingBill: (bill) => {
+    const newBill: PendingBill = {
+      ...bill,
+      id: generateId(),
+      created_at: new Date().toISOString().split('T')[0],
+    };
+    const pendingBills = [...get().pendingBills, newBill];
+    set({ pendingBills });
+    saveData(STORAGE_KEYS.PENDING_BILLS, pendingBills);
+  },
+  
+  confirmPendingBill: (id) => {
+    const pendingBill = get().pendingBills.find(b => b.id === id);
+    if (!pendingBill) return;
     
     const today = new Date().toISOString().split('T')[0];
     const newExpense: Expense = {
       id: generateId(),
-      amount: fixedExpense.amount,
-      category: fixedExpense.category,
-      pet_id: fixedExpense.pet_id,
-      merchant: fixedExpense.merchant,
+      amount: pendingBill.amount,
+      category: pendingBill.category,
+      pet_id: pendingBill.pet_id,
+      merchant: pendingBill.merchant,
       quantity: 1,
-      remark: `[自动生成] ${fixedExpense.name}`,
+      remark: `[固定开销] ${pendingBill.fixed_expense_name}`,
       receipt: '',
       is_fixed: true,
+      fixed_expense_id: pendingBill.fixed_expense_id,
+      is_confirmed: true,
       created_at: today,
       updated_at: today,
-      splits: fixedExpense.splits,
+      splits: pendingBill.splits,
     };
     
     const expenses = [...get().expenses, newExpense];
-    set({ expenses });
-    saveData(STORAGE_KEYS.EXPENSES, expenses);
+    const pendingBills = get().pendingBills.filter(b => b.id !== id);
+    
+    const fixedExpense = get().fixedExpenses.find(f => f.id === pendingBill.fixed_expense_id);
+    if (fixedExpense) {
+      const nextDate = calculateNextGenerateDate(today, fixedExpense.cycle_type);
+      const fixedExpenses = get().fixedExpenses.map(f => 
+        f.id === fixedExpense.id 
+          ? { ...f, last_generated_date: today, next_generate_date: nextDate }
+          : f
+      );
+      set({ expenses, pendingBills, fixedExpenses });
+      saveData(STORAGE_KEYS.EXPENSES, expenses);
+      saveData(STORAGE_KEYS.PENDING_BILLS, pendingBills);
+      saveData(STORAGE_KEYS.FIXED_EXPENSES, fixedExpenses);
+    } else {
+      set({ expenses, pendingBills });
+      saveData(STORAGE_KEYS.EXPENSES, expenses);
+      saveData(STORAGE_KEYS.PENDING_BILLS, pendingBills);
+    }
+  },
+  
+  deletePendingBill: (id) => {
+    const pendingBills = get().pendingBills.filter(b => b.id !== id);
+    set({ pendingBills });
+    saveData(STORAGE_KEYS.PENDING_BILLS, pendingBills);
+  },
+  
+  checkAndGeneratePendingBills: () => {
+    const today = new Date().toISOString().split('T')[0];
+    const existingPending = get().pendingBills;
+    
+    get().fixedExpenses.forEach(fixedExpense => {
+      if (!fixedExpense.is_active) return;
+      
+      const alreadyHasPending = existingPending.some(
+        b => b.fixed_expense_id === fixedExpense.id && b.scheduled_date === fixedExpense.next_generate_date
+      );
+      
+      if (alreadyHasPending) return;
+      
+      if (isDateReached(fixedExpense.next_generate_date)) {
+        const newBill: PendingBill = {
+          id: generateId(),
+          fixed_expense_id: fixedExpense.id,
+          fixed_expense_name: fixedExpense.name,
+          amount: fixedExpense.amount,
+          category: fixedExpense.category,
+          pet_id: fixedExpense.pet_id,
+          merchant: fixedExpense.merchant,
+          scheduled_date: fixedExpense.next_generate_date,
+          splits: fixedExpense.splits,
+          created_at: today,
+        };
+        const pendingBills = [...get().pendingBills, newBill];
+        set({ pendingBills });
+        saveData(STORAGE_KEYS.PENDING_BILLS, pendingBills);
+      }
+    });
   },
   
   setCurrentMonth: (month) => set({ currentMonth: month }),

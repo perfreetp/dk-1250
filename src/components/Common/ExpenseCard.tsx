@@ -1,5 +1,5 @@
 import { Expense, Pet, CATEGORY_LABELS, CATEGORY_COLORS } from '../../types';
-import { formatCurrency, formatDate, calculateSplitAmount } from '../../utils/helpers';
+import { formatCurrency, formatDate, getPetSplitAmount } from '../../utils/helpers';
 import { ShoppingCart, Stethoscope, Scissors, Gamepad2, Home, Image } from 'lucide-react';
 import { useState } from 'react';
 
@@ -7,6 +7,7 @@ interface ExpenseCardProps {
   expense: Expense;
   pet?: Pet;
   pets?: Pet[];
+  filterPetId?: string | null;
   onClick?: () => void;
 }
 
@@ -18,13 +19,16 @@ const categoryIcons = {
   boarding: Home,
 };
 
-export default function ExpenseCard({ expense, pet, pets = [], onClick }: ExpenseCardProps) {
+export default function ExpenseCard({ expense, pet, pets = [], filterPetId, onClick }: ExpenseCardProps) {
   const Icon = categoryIcons[expense.category];
   const color = CATEGORY_COLORS[expense.category];
   const [showReceipt, setShowReceipt] = useState(false);
   
-  const splits = calculateSplitAmount(expense);
-  const hasMultiplePets = Object.keys(splits).length > 1;
+  const hasSplits = expense.splits && expense.splits.length > 1;
+  const displayAmount = filterPetId ? getPetSplitAmount(expense, filterPetId) : expense.amount;
+  const totalAmount = hasSplits 
+    ? expense.splits!.reduce((sum, s) => sum + s.amount, 0)
+    : expense.amount;
   
   return (
     <div
@@ -43,28 +47,24 @@ export default function ExpenseCard({ expense, pet, pets = [], onClick }: Expens
             <p className="font-medium text-foreground">
               {CATEGORY_LABELS[expense.category]}
             </p>
-            {hasMultiplePets ? (
-              <div className="flex items-center gap-1 mt-1">
-                {Object.entries(splits).map(([petId, amount]) => {
-                  const splitPet = pets.find(p => p.id === petId);
-                  return (
-                    <span key={petId} className="text-sm text-gray-500">
-                      {splitPet?.avatar}{formatCurrency(amount)}
-                    </span>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-500">
-                {pet?.avatar} {pet?.name}
-              </p>
-            )}
+            <p className="text-sm text-gray-500">
+              {pet?.avatar} {pet?.name}
+            </p>
           </div>
         </div>
         <div className="text-right">
           <p className="text-lg font-bold text-foreground">
-            {formatCurrency(expense.amount)}
+            {hasSplits && filterPetId ? (
+              <span className="text-primary">{formatCurrency(displayAmount)}</span>
+            ) : (
+              formatCurrency(displayAmount)
+            )}
           </p>
+          {hasSplits && (
+            <p className="text-xs text-gray-400">
+              共 {formatCurrency(totalAmount)}
+            </p>
+          )}
           {expense.is_fixed && (
             <span className="text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-full">
               固定
@@ -77,6 +77,26 @@ export default function ExpenseCard({ expense, pet, pets = [], onClick }: Expens
         <div className="text-sm text-gray-500 space-y-1">
           {expense.merchant && <p>商家: {expense.merchant}</p>}
           {expense.remark && <p className="line-clamp-2">{expense.remark}</p>}
+        </div>
+      )}
+      
+      {hasSplits && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {expense.splits!.map((split) => {
+            const splitPet = pets.find(p => p.id === split.pet_id);
+            return (
+              <span 
+                key={split.pet_id}
+                className={`text-xs px-2 py-0.5 rounded-full ${
+                  split.pet_id === filterPetId 
+                    ? 'bg-primary/20 text-primary font-medium' 
+                    : 'bg-gray-100 text-gray-600'
+                }`}
+              >
+                {splitPet?.avatar}{formatCurrency(split.amount)}
+              </span>
+            );
+          })}
         </div>
       )}
       

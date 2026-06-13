@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, Download } from 'lucide-react';
 import { format, subMonths, addMonths, parseISO } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { useStore } from '../store/useStore';
-import { getMonthlyTotal, getCategoryTotal, formatCurrency, getPetSplitAmount } from '../utils/helpers';
+import { getMonthlyTotal, formatCurrency, getPetSplitAmount, calculateSplitAmount } from '../utils/helpers';
 import { Category, CATEGORY_LABELS, CATEGORY_COLORS } from '../types';
 import StatCard from '../components/Common/StatCard';
 import MonthlyBarChart from '../components/Charts/MonthlyBarChart';
@@ -13,7 +13,7 @@ import CategoryIcon from '../components/Common/CategoryIcon';
 import * as XLSX from 'xlsx';
 
 export default function ReportPage() {
-  const { pets, expenses, currentMonth, setCurrentMonth } = useStore();
+  const { pets, expenses, currentMonth } = useStore();
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
   const [filterPetId, setFilterPetId] = useState<string | null>(null);
   const [filterCategory, setFilterCategory] = useState<Category | null>(null);
@@ -54,10 +54,8 @@ export default function ReportPage() {
       return filteredExpenses.reduce((sum, e) => sum + getPetSplitAmount(e, filterPetId), 0);
     }
     return filteredExpenses.reduce((sum, e) => {
-      if (e.splits && e.splits.length > 0) {
-        return sum + e.splits.reduce((s, split) => s + split.amount, 0);
-      }
-      return sum + e.amount;
+      const splits = calculateSplitAmount(e);
+      return sum + Object.values(splits).reduce((s, a) => s + a, 0);
     }, 0);
   }, [filteredExpenses, filterPetId]);
   
@@ -85,10 +83,8 @@ export default function ReportPage() {
       return prevMonthFilteredExpenses.reduce((sum, e) => sum + getPetSplitAmount(e, filterPetId), 0);
     }
     return prevMonthFilteredExpenses.reduce((sum, e) => {
-      if (e.splits && e.splits.length > 0) {
-        return sum + e.splits.reduce((s, split) => s + split.amount, 0);
-      }
-      return sum + e.amount;
+      const splits = calculateSplitAmount(e);
+      return sum + Object.values(splits).reduce((s, a) => s + a, 0);
     }, 0);
   }, [prevMonthFilteredExpenses, filterPetId]);
   
@@ -108,10 +104,8 @@ export default function ReportPage() {
         if (filterPetId) {
           return sum + getPetSplitAmount(e, filterPetId);
         }
-        if (e.splits && e.splits.length > 0) {
-          return sum + e.splits.reduce((s, split) => s + split.amount, 0);
-        }
-        return sum + e.amount;
+        const splits = calculateSplitAmount(e);
+        return sum + Object.values(splits).reduce((s, a) => s + a, 0);
       }, 0);
       data.push({
         date: `${day}日`,
@@ -144,10 +138,8 @@ export default function ReportPage() {
         if (filterPetId) {
           return sum + getPetSplitAmount(e, filterPetId);
         }
-        if (e.splits && e.splits.length > 0) {
-          return sum + e.splits.reduce((s, split) => s + split.amount, 0);
-        }
-        return sum + e.amount;
+        const splits = calculateSplitAmount(e);
+        return sum + Object.values(splits).reduce((s, a) => s + a, 0);
       }, 0);
       
       data.push({
