@@ -144,22 +144,8 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
       return;
     }
     
-    const expenseData = {
-      amount: parseFloat(amount),
-      category,
-      pet_id: selectedPets[0] || '',
-      merchant,
-      quantity: parseInt(quantity) || 1,
-      remark,
-      receipt,
-      is_fixed: isFixed,
-      cycle_type: isFixed ? cycleType : undefined,
-      next_generate_date: isFixed ? nextGenerateDate : undefined,
-      splits: getExpenseSplits(),
-      created_at: new Date().toISOString().split('T')[0],
-    };
-    
     if (isFixed) {
+      if (!nextGenerateDate) return;
       addFixedExpense({
         name: remark || `${CATEGORY_LABELS[category]} - ${merchant}` || '固定支出',
         amount: parseFloat(amount),
@@ -171,11 +157,30 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
         is_active: true,
         splits: getExpenseSplits(),
       });
+      onClose();
+      return;
     }
+    
+    const expenseData = {
+      amount: parseFloat(amount),
+      category,
+      pet_id: selectedPets[0] || '',
+      merchant,
+      quantity: parseInt(quantity) || 1,
+      remark,
+      receipt,
+      is_fixed: false,
+      splits: getExpenseSplits(),
+      created_at: new Date().toISOString().split('T')[0],
+    };
     
     addExpense(expenseData);
     onClose();
   };
+  
+  const isFixedValid = isFixed && nextGenerateDate && parseFloat(amount) > 0;
+  const isRegularValid = parseFloat(amount) > 0 && (selectedPets.length <= 1 || isSplitValid);
+  const canSubmit = isFixed ? isFixedValid : isRegularValid;
   
   return (
     <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4">
@@ -491,14 +496,21 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
           
           <button
             type="submit"
-            disabled={selectedPets.length > 1 && !isSplitValid}
+            disabled={!canSubmit}
             className={`w-full py-4 font-bold rounded-2xl transition-colors ${
-              selectedPets.length > 1 && !isSplitValid
+              !canSubmit
                 ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                 : 'bg-primary text-white hover:bg-primary-600'
             }`}
           >
-            {selectedPets.length > 1 && !isSplitValid ? '请先完成分摊分配' : '保存记录'}
+            {!canSubmit
+              ? isFixed && !nextGenerateDate
+                ? '请选择生成日期'
+                : selectedPets.length > 1 && !isSplitValid
+                  ? '请先完成分摊分配'
+                  : '请填写金额'
+              : isFixed ? '保存固定开销计划' : '保存记录'
+            }
           </button>
         </form>
       </div>

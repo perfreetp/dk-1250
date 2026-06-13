@@ -50,16 +50,23 @@ export default function HomePage() {
   
   const upcomingFixedExpenses = useMemo(() => {
     const today = new Date();
+    const pendingIds = pendingBills.map(b => b.fixed_expense_id);
     return fixedExpenses
-      .filter(f => f.is_active)
+      .filter(f => f.is_active && !pendingIds.includes(f.id))
       .map(f => {
         const nextDate = new Date(f.next_generate_date);
         const daysUntil = differenceInDays(nextDate, today);
-        return { ...f, daysUntil };
+        return { ...f, daysUntil, status: daysUntil <= 3 ? 'urgent' : daysUntil <= 7 ? 'upcoming' : 'normal' };
       })
       .filter(f => f.daysUntil <= 7)
       .sort((a, b) => a.daysUntil - b.daysUntil);
-  }, [fixedExpenses]);
+  }, [fixedExpenses, pendingBills]);
+  
+  const confirmedThisMonth = useMemo(() => {
+    return expenses.filter(e => 
+      e.is_fixed && e.is_confirmed && e.created_at.startsWith(currentMonth)
+    );
+  }, [expenses, currentMonth]);
   
   return (
     <div className="space-y-6">
@@ -136,34 +143,6 @@ export default function HomePage() {
         </div>
       </div>
       
-      {upcomingFixedExpenses.length > 0 && (
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center gap-2 mb-4">
-            <Calendar size={20} className="text-primary" />
-            <h2 className="text-lg font-bold">即将生成的固定支出</h2>
-          </div>
-          <div className="space-y-3">
-            {upcomingFixedExpenses.slice(0, 3).map((fixed) => {
-              const pet = pets.find(p => p.id === fixed.pet_id);
-              return (
-                <div key={fixed.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
-                  <div className="flex items-center gap-3">
-                    <span className="text-2xl">{pet?.avatar}</span>
-                    <div>
-                      <p className="font-medium">{fixed.name}</p>
-                      <p className="text-sm text-gray-500">
-                        {fixed.daysUntil <= 0 ? '今天到期' : `${fixed.daysUntil}天后`}
-                      </p>
-                    </div>
-                  </div>
-                  <span className="font-bold">{formatCurrency(fixed.amount)}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-      
       {pendingBills.length > 0 && (
         <div className="bg-gradient-to-r from-amber-50 to-orange-50 rounded-2xl p-6 shadow-sm border border-amber-200">
           <div className="flex items-center gap-2 mb-4">
@@ -183,8 +162,8 @@ export default function HomePage() {
                     <span className="text-2xl">{pet?.avatar}</span>
                     <div>
                       <p className="font-medium">{bill.fixed_expense_name}</p>
-                      <p className="text-sm text-gray-500">
-                        {daysUntil <= 0 ? '今天' : `${daysUntil}天后`} · {CATEGORY_LABELS[bill.category]}
+                      <p className="text-sm text-amber-600 font-medium">
+                        {daysUntil <= 0 ? '⚠️ 今天到期，请确认' : `⏰ ${daysUntil}天后到期`}
                       </p>
                     </div>
                   </div>
@@ -212,6 +191,71 @@ export default function HomePage() {
           <p className="text-xs text-amber-600 mt-3">
             确认后会自动计入本月消费，下次日期将自动顺延
           </p>
+        </div>
+      )}
+      
+      {upcomingFixedExpenses.length > 0 && (
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-blue-100">
+          <div className="flex items-center gap-2 mb-4">
+            <Calendar size={20} className="text-blue-500" />
+            <h2 className="text-lg font-bold">即将到期</h2>
+            <span className="ml-auto text-sm text-blue-600 bg-blue-50 px-2 py-1 rounded-full">
+              {upcomingFixedExpenses.length} 条计划
+            </span>
+          </div>
+          <div className="space-y-3">
+            {upcomingFixedExpenses.map((fixed) => {
+              const pet = pets.find(p => p.id === fixed.pet_id);
+              return (
+                <div key={fixed.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">{pet?.avatar}</span>
+                    <div>
+                      <p className="font-medium">{fixed.name}</p>
+                      <p className={`text-sm font-medium ${
+                        fixed.status === 'urgent' ? 'text-red-500' : 'text-gray-500'
+                      }`}>
+                        {fixed.daysUntil <= 0 ? '⚡ 今天到期' : `📅 ${fixed.daysUntil}天后到期`}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="font-bold">{formatCurrency(fixed.amount)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      
+      {confirmedThisMonth.length > 0 && (
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-green-100">
+          <div className="flex items-center gap-2 mb-4">
+            <Check size={20} className="text-green-500" />
+            <h2 className="text-lg font-bold">已确认入账</h2>
+            <span className="ml-auto text-sm text-green-600 bg-green-50 px-2 py-1 rounded-full">
+              本月 {confirmedThisMonth.length} 笔
+            </span>
+          </div>
+          <div className="space-y-2">
+            {confirmedThisMonth.slice(0, 3).map((expense) => {
+              const pet = pets.find(p => p.id === expense.pet_id);
+              const fixedExpense = fixedExpenses.find(f => f.id === expense.fixed_expense_id);
+              return (
+                <div key={expense.id} className="flex items-center justify-between p-3 bg-green-50 rounded-xl">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">{pet?.avatar}</span>
+                    <div>
+                      <p className="font-medium">{fixedExpense?.name || expense.remark}</p>
+                      <p className="text-xs text-gray-500">
+                        {CATEGORY_LABELS[expense.category]} · {expense.created_at.slice(5)}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="font-bold text-green-600">{formatCurrency(expense.amount)}</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
       

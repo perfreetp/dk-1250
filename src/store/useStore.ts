@@ -255,16 +255,28 @@ export const useStore = create<AppStore>((set, get) => ({
     
     const fixedExpense = get().fixedExpenses.find(f => f.id === pendingBill.fixed_expense_id);
     if (fixedExpense) {
-      const nextDate = calculateNextGenerateDate(today, fixedExpense.cycle_type);
-      const fixedExpenses = get().fixedExpenses.map(f => 
-        f.id === fixedExpense.id 
-          ? { ...f, last_generated_date: today, next_generate_date: nextDate }
-          : f
-      );
-      set({ expenses, pendingBills, fixedExpenses });
-      saveData(STORAGE_KEYS.EXPENSES, expenses);
-      saveData(STORAGE_KEYS.PENDING_BILLS, pendingBills);
-      saveData(STORAGE_KEYS.FIXED_EXPENSES, fixedExpenses);
+      if (fixedExpense.cycle_type === 'once') {
+        const fixedExpenses = get().fixedExpenses.map(f => 
+          f.id === fixedExpense.id 
+            ? { ...f, last_generated_date: today, is_active: false }
+            : f
+        );
+        set({ expenses, pendingBills, fixedExpenses });
+        saveData(STORAGE_KEYS.EXPENSES, expenses);
+        saveData(STORAGE_KEYS.PENDING_BILLS, pendingBills);
+        saveData(STORAGE_KEYS.FIXED_EXPENSES, fixedExpenses);
+      } else {
+        const nextDate = calculateNextGenerateDate(today, fixedExpense.cycle_type);
+        const fixedExpenses = get().fixedExpenses.map(f => 
+          f.id === fixedExpense.id 
+            ? { ...f, last_generated_date: today, next_generate_date: nextDate }
+            : f
+        );
+        set({ expenses, pendingBills, fixedExpenses });
+        saveData(STORAGE_KEYS.EXPENSES, expenses);
+        saveData(STORAGE_KEYS.PENDING_BILLS, pendingBills);
+        saveData(STORAGE_KEYS.FIXED_EXPENSES, fixedExpenses);
+      }
     } else {
       set({ expenses, pendingBills });
       saveData(STORAGE_KEYS.EXPENSES, expenses);
