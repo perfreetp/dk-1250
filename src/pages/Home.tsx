@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { Plus, TrendingUp, Calendar, RefreshCw } from 'lucide-react';
 import { format, differenceInDays, addDays } from 'date-fns';
 import { useStore } from '../store/useStore';
-import { getMonthlyTotal, getCategoryTotal, formatCurrency, calculateSplitAmount } from '../utils/helpers';
+import { getMonthlyTotal, getCategoryTotal, formatCurrency, getPetSplitAmount } from '../utils/helpers';
 import { Category, CATEGORY_LABELS } from '../types';
 import ExpenseCard from '../components/Common/ExpenseCard';
 import PetAvatar from '../components/Common/PetAvatar';
@@ -13,10 +13,10 @@ import QuickAddForm from '../components/Forms/QuickAddForm';
 const categories: Category[] = ['food', 'medical', 'beauty', 'toy', 'boarding'];
 
 export default function HomePage() {
-  const { pets, expenses, budgets, fixedExpenses, selectedPetId, setSelectedPet, currentMonth, generateFixedExpense } = useStore();
+  const { pets, expenses, budgets, fixedExpenses, selectedPetId, setSelectedPet, currentMonth, generateFixedExpense, updateFixedExpense } = useStore();
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   
-  const monthlyTotal = useMemo(() => getMonthlyTotal(expenses, currentMonth), [expenses, currentMonth]);
+  const monthlyTotal = useMemo(() => getMonthlyTotal(expenses, currentMonth, selectedPetId), [expenses, currentMonth, selectedPetId]);
   
   const currentBudget = useMemo(() => {
     return budgets.find(b => b.month === currentMonth);
@@ -28,8 +28,8 @@ export default function HomePage() {
     let filtered = expenses.filter(e => e.created_at.startsWith(currentMonth));
     if (selectedPetId) {
       filtered = filtered.filter(e => {
-        const splits = calculateSplitAmount(e);
-        return splits[selectedPetId] !== undefined;
+        const splits = getPetSplitAmount(e, selectedPetId);
+        return splits > 0;
       });
     }
     return filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -40,9 +40,9 @@ export default function HomePage() {
   const categoryTotals = useMemo(() => {
     return categories.map(cat => ({
       category: cat,
-      amount: getCategoryTotal(expenses, currentMonth, cat),
+      amount: getCategoryTotal(expenses, currentMonth, cat, selectedPetId),
     }));
-  }, [expenses, currentMonth]);
+  }, [expenses, currentMonth, selectedPetId]);
   
   const upcomingFixedExpenses = useMemo(() => {
     const today = new Date();
@@ -59,6 +59,20 @@ export default function HomePage() {
   
   const handleGenerateFixedExpense = (id: string) => {
     generateFixedExpense(id);
+    const fixed = fixedExpenses.find(f => f.id === id);
+    if (fixed) {
+      const nextDate = new Date(fixed.next_generate_date);
+      if (fixed.cycle_type === 'weekly') {
+        nextDate.setDate(nextDate.getDate() + 7);
+      } else if (fixed.cycle_type === 'monthly') {
+        nextDate.setMonth(nextDate.getMonth() + 1);
+      } else if (fixed.cycle_type === 'quarterly') {
+        nextDate.setMonth(nextDate.getMonth() + 3);
+      } else if (fixed.cycle_type === 'yearly') {
+        nextDate.setFullYear(nextDate.getFullYear() + 1);
+      }
+      updateFixedExpense(id, { next_generate_date: format(nextDate, 'yyyy-MM-dd') });
+    }
   };
   
   return (
@@ -74,7 +88,9 @@ export default function HomePage() {
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <p className="text-sm text-gray-500">本月消费</p>
+              <p className="text-sm text-gray-500">
+                {selectedPetId ? pets.find(p => p.id === selectedPetId)?.name + '的' : ''}本月消费
+              </p>
               <p className="text-3xl font-bold text-foreground">{formatCurrency(monthlyTotal)}</p>
             </div>
             <div className="relative w-24 h-24">

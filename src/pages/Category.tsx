@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useStore } from '../store/useStore';
-import { getCategoryTotal, getPetTotal, formatCurrency, calculateSplitAmount } from '../utils/helpers';
+import { getCategoryTotal, formatCurrency, getPetSplitAmount } from '../utils/helpers';
 import { Category, CATEGORY_LABELS, CATEGORY_COLORS } from '../types';
 import CategoryIcon from '../components/Common/CategoryIcon';
 import ExpenseCard from '../components/Common/ExpenseCard';
@@ -19,8 +19,8 @@ export default function CategoryPage() {
     
     if (selectedPetId) {
       filtered = filtered.filter(e => {
-        const splits = calculateSplitAmount(e);
-        return splits[selectedPetId] !== undefined;
+        const splits = getPetSplitAmount(e, selectedPetId);
+        return splits > 0;
       });
     }
     
@@ -36,16 +36,19 @@ export default function CategoryPage() {
     
     if (selectedPetId) {
       filteredExpenses = filteredExpenses.filter(e => {
-        const splits = calculateSplitAmount(e);
-        return splits[selectedPetId] !== undefined;
+        const splits = getPetSplitAmount(e, selectedPetId);
+        return splits > 0;
       });
     }
     
     const categoryTotals = categories.map(cat => {
       const catExpenses = filteredExpenses.filter(e => e.category === cat);
       const total = catExpenses.reduce((sum, e) => {
-        const splits = calculateSplitAmount(e);
-        return sum + Object.values(splits).reduce((s, a) => s + a, 0);
+        if (selectedPetId) {
+          return sum + getPetSplitAmount(e, selectedPetId);
+        }
+        const splits = Object.values(getPetSplitAmount(e, e.pet_id));
+        return sum + splits.reduce((s, a) => s + a, 0);
       }, 0);
       return { category: cat, amount: total };
     });
@@ -108,17 +111,7 @@ export default function CategoryPage() {
         <h2 className="text-lg font-bold mb-4">各类别统计</h2>
         <div className="space-y-3">
           {categories.map((cat) => {
-            let catTotal = getCategoryTotal(expenses, currentMonth, cat);
-            if (selectedPetId) {
-              const catExpenses = expenses.filter(e => 
-                e.created_at.startsWith(currentMonth) && 
-                e.category === cat
-              );
-              catTotal = catExpenses.reduce((sum, e) => {
-                const splits = calculateSplitAmount(e);
-                return sum + (splits[selectedPetId] || 0);
-              }, 0);
-            }
+            let catTotal = getCategoryTotal(expenses, currentMonth, cat, selectedPetId);
             
             const percentage = totalAmount > 0 ? (catTotal / totalAmount) * 100 : 0;
             const isSelected = selectedCategory === cat;

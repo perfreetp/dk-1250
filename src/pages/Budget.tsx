@@ -3,8 +3,8 @@ import { AlertTriangle, Calendar, Settings, Bell, X, Check, RefreshCw } from 'lu
 import { format, differenceInDays, addMonths, addWeeks, addYears } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { useStore } from '../store/useStore';
-import { getMonthlyTotal, getCategoryTotal, formatCurrency, calculateSplitAmount, detectAnomaly } from '../utils/helpers';
-import { Category, CATEGORY_LABELS, CATEGORY_COLORS, ReminderType, CycleType } from '../types';
+import { getMonthlyTotal, getCategoryTotal, formatCurrency, getPetSplitAmount } from '../utils/helpers';
+import { Category, CATEGORY_LABELS, CATEGORY_COLORS, ReminderType } from '../types';
 import BudgetProgress from '../components/Common/BudgetProgress';
 
 const categories: Category[] = ['food', 'medical', 'beauty', 'toy', 'boarding'];
@@ -24,7 +24,7 @@ const reminderColors: Record<ReminderType, string> = {
 };
 
 export default function BudgetPage() {
-  const { pets, expenses, budgets, reminders, currentMonth, addBudget, updateBudget, processReminder } = useStore();
+  const { pets, expenses, budgets, reminders, fixedExpenses, currentMonth, addBudget, updateBudget, processReminder, generateFixedExpense, updateFixedExpense } = useStore();
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [showReminderModal, setShowReminderModal] = useState(false);
   const [editingReminder, setEditingReminder] = useState<string | null>(null);
@@ -56,7 +56,10 @@ export default function BudgetPage() {
   
   const anomalies = useMemo(() => {
     const monthExpenses = expenses.filter(e => e.created_at.startsWith(currentMonth));
-    return monthExpenses.filter(e => detectAnomaly(e, expenses));
+    return monthExpenses.filter(e => {
+      const splits = getPetSplitAmount(e, e.pet_id);
+      return splits > (getMonthlyTotal(expenses, currentMonth) / monthExpenses.length) * 2;
+    });
   }, [expenses, currentMonth]);
   
   const upcomingReminders = useMemo(() => {
@@ -73,6 +76,19 @@ export default function BudgetPage() {
         return a.daysUntil - b.daysUntil;
       });
   }, [reminders, pets]);
+  
+  const upcomingFixedExpenses = useMemo(() => {
+    const today = new Date();
+    return fixedExpenses
+      .filter(f => f.is_active)
+      .map(f => {
+        const nextDate = new Date(f.next_generate_date);
+        const daysUntil = differenceInDays(nextDate, today);
+        return { ...f, daysUntil };
+      })
+      .filter(f => f.daysUntil <= 7)
+      .sort((a, b) => a.daysUntil - b.daysUntil);
+  }, [fixedExpenses]);
   
   const handleSaveBudget = () => {
     if (currentBudget) {
@@ -95,6 +111,24 @@ export default function BudgetPage() {
     setShowReminderModal(false);
     setEditingReminder(null);
     setNewReminderDate('');
+  };
+  
+  const handleGenerateFixedExpense = (id: string) => {
+    generateFixedExpense(id);
+    const fixed = fixedExpenses.find(f => f.id === id);
+    if (fixed) {
+      const nextDate = new Date(fixed.next_generate_date);
+      if (fixed.cycle_type === 'weekly') {
+        nextDate.setDate(nextDate.getDate() + 7);
+      } else if (fixed.cycle_type === 'monthly') {
+        nextDate.setMonth(nextDate.getMonth() + 1);
+      } else if (fixed.cycle_type === 'quarterly') {
+        nextDate.setMonth(nextDate.getMonth() + 3);
+      } else if (fixed.cycle_type === 'yearly') {
+        nextDate.setFullYear(nextDate.getFullYear() + 1);
+      }
+      updateFixedExpense(id, { next_generate_date: format(nextDate, 'yyyy-MM-dd') });
+    }
   };
   
   const openReminderModal = (id: string) => {
@@ -211,6 +245,45 @@ export default function BudgetPage() {
         </div>
       </div>
       
+      {upcomingFixedExpenses.length > 0 && (
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+          <div className="flex items-center gap-2 mb-4">
+            <Calendar size={20} className="text-primary" />
+            <h2 className="text-lg font-bold">固定支出提醒</h2>
+          </div>
+          <div className="space-y-3">
+            {upcomingFixedExpenses.map((fixed) => {
+              const pet = pets.find(p => p.id === fixed.pet_id);
+              return (
+                <div key={fixed.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">{pet?.avatar}</span>
+                    <div>
+                      <p className="font-medium">{fixed.name}</p>
+                      <p className="text-sm text-gray-500">
+                        {fixed.daysUntil <= 0 ? '今天到期' : `${fixed.daysUntil}天后`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-bold">{formatCurrency(fixed.amount)}</span>
+                    {fixed.daysUntil <= 0 && (
+                      <button
+                        onClick={() => handleGenerateFixedExpense(fixed.id)}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-primary text-white text-sm rounded-lg hover:bg-primary-600 transition-colors"
+                      >
+                        <RefreshCw size={14} />
+                        <span>生成</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      
       {anomalies.length > 0 && (
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
           <div className="flex items-center gap-2 mb-4">
@@ -220,7 +293,7 @@ export default function BudgetPage() {
           <div className="space-y-3">
             {anomalies.map((expense) => {
               const pet = pets.find(p => p.id === expense.pet_id);
-              const splitTotal = Object.values(calculateSplitAmount(expense)).reduce((s, v) => s + v, 0);
+              const splitTotal = getPetSplitAmount(expense, expense.pet_id);
               return (
                 <div key={expense.id} className="p-4 rounded-xl bg-accent/10 border border-accent/20">
                   <div className="flex items-center justify-between">

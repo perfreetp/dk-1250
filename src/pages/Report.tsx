@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, Download } from 'lucide-react';
 import { format, subMonths, addMonths, parseISO } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { useStore } from '../store/useStore';
-import { getMonthlyTotal, getCategoryTotal, getPetTotal, formatCurrency, calculateSplitAmount } from '../utils/helpers';
+import { getMonthlyTotal, getCategoryTotal, formatCurrency, getPetSplitAmount } from '../utils/helpers';
 import { Category, CATEGORY_LABELS, CATEGORY_COLORS } from '../types';
 import StatCard from '../components/Common/StatCard';
 import MonthlyBarChart from '../components/Charts/MonthlyBarChart';
@@ -37,8 +37,8 @@ export default function ReportPage() {
     
     if (filterPetId) {
       filtered = filtered.filter(e => {
-        const splits = calculateSplitAmount(e);
-        return splits[filterPetId] !== undefined;
+        const splits = getPetSplitAmount(e, filterPetId);
+        return splits > 0;
       });
     }
     
@@ -50,11 +50,16 @@ export default function ReportPage() {
   }, [expenses, selectedMonth, filterPetId, filterCategory]);
   
   const monthlyTotal = useMemo(() => {
+    if (filterPetId) {
+      return filteredExpenses.reduce((sum, e) => sum + getPetSplitAmount(e, filterPetId), 0);
+    }
     return filteredExpenses.reduce((sum, e) => {
-      const splits = calculateSplitAmount(e);
-      return sum + Object.values(splits).reduce((s, a) => s + a, 0);
+      if (e.splits && e.splits.length > 0) {
+        return sum + e.splits.reduce((s, split) => s + split.amount, 0);
+      }
+      return sum + e.amount;
     }, 0);
-  }, [filteredExpenses]);
+  }, [filteredExpenses, filterPetId]);
   
   const prevMonthFilteredExpenses = useMemo(() => {
     const prevDate = subMonths(currentDate, 1);
@@ -63,8 +68,8 @@ export default function ReportPage() {
     
     if (filterPetId) {
       filtered = filtered.filter(e => {
-        const splits = calculateSplitAmount(e);
-        return splits[filterPetId] !== undefined;
+        const splits = getPetSplitAmount(e, filterPetId);
+        return splits > 0;
       });
     }
     
@@ -76,11 +81,16 @@ export default function ReportPage() {
   }, [expenses, currentDate, filterPetId, filterCategory]);
   
   const prevMonthTotal = useMemo(() => {
+    if (filterPetId) {
+      return prevMonthFilteredExpenses.reduce((sum, e) => sum + getPetSplitAmount(e, filterPetId), 0);
+    }
     return prevMonthFilteredExpenses.reduce((sum, e) => {
-      const splits = calculateSplitAmount(e);
-      return sum + Object.values(splits).reduce((s, a) => s + a, 0);
+      if (e.splits && e.splits.length > 0) {
+        return sum + e.splits.reduce((s, split) => s + split.amount, 0);
+      }
+      return sum + e.amount;
     }, 0);
-  }, [prevMonthFilteredExpenses]);
+  }, [prevMonthFilteredExpenses, filterPetId]);
   
   const monthChange = useMemo(() => {
     if (prevMonthTotal === 0) return 0;
@@ -95,8 +105,13 @@ export default function ReportPage() {
       const dateStr = `${selectedMonth}-${day.toString().padStart(2, '0')}`;
       const dayExpenses = filteredExpenses.filter(e => e.created_at === dateStr);
       const amount = dayExpenses.reduce((sum, e) => {
-        const splits = calculateSplitAmount(e);
-        return sum + Object.values(splits).reduce((s, a) => s + a, 0);
+        if (filterPetId) {
+          return sum + getPetSplitAmount(e, filterPetId);
+        }
+        if (e.splits && e.splits.length > 0) {
+          return sum + e.splits.reduce((s, split) => s + split.amount, 0);
+        }
+        return sum + e.amount;
       }, 0);
       data.push({
         date: `${day}日`,
@@ -105,7 +120,7 @@ export default function ReportPage() {
     }
     
     return data;
-  }, [filteredExpenses, selectedMonth, currentDate]);
+  }, [filteredExpenses, selectedMonth, currentDate, filterPetId]);
   
   const trendData = useMemo(() => {
     const data = [];
@@ -116,8 +131,8 @@ export default function ReportPage() {
       
       if (filterPetId) {
         monthExpenses = monthExpenses.filter(e => {
-          const splits = calculateSplitAmount(e);
-          return splits[filterPetId] !== undefined;
+          const splits = getPetSplitAmount(e, filterPetId);
+          return splits > 0;
         });
       }
       
@@ -126,8 +141,13 @@ export default function ReportPage() {
       }
       
       const total = monthExpenses.reduce((sum, e) => {
-        const splits = calculateSplitAmount(e);
-        return sum + Object.values(splits).reduce((s, a) => s + a, 0);
+        if (filterPetId) {
+          return sum + getPetSplitAmount(e, filterPetId);
+        }
+        if (e.splits && e.splits.length > 0) {
+          return sum + e.splits.reduce((s, split) => s + split.amount, 0);
+        }
+        return sum + e.amount;
       }, 0);
       
       data.push({
@@ -140,13 +160,17 @@ export default function ReportPage() {
   
   const topExpenses = useMemo(() => {
     return filteredExpenses
-      .sort((a, b) => {
-        const aTotal = Object.values(calculateSplitAmount(a)).reduce((s, v) => s + v, 0);
-        const bTotal = Object.values(calculateSplitAmount(b)).reduce((s, v) => s + v, 0);
-        return bTotal - aTotal;
-      })
+      .map(e => ({
+        ...e,
+        displayAmount: filterPetId ? getPetSplitAmount(e, filterPetId) : (
+          e.splits && e.splits.length > 0 
+            ? e.splits.reduce((s, split) => s + split.amount, 0)
+            : e.amount
+        ),
+      }))
+      .sort((a, b) => b.displayAmount - a.displayAmount)
       .slice(0, 5);
-  }, [filteredExpenses]);
+  }, [filteredExpenses, filterPetId]);
   
   const exportToExcel = () => {
     const wb = XLSX.utils.book_new();
@@ -174,19 +198,64 @@ export default function ReportPage() {
     XLSX.utils.book_append_sheet(wb, ws, '消费汇总');
     
     const detailData = [
-      ['日期', '分类', '金额', '商家', '备注', '票据'],
-      ...filteredExpenses.map(e => [
-        e.created_at,
-        CATEGORY_LABELS[e.category],
-        e.amount,
-        e.merchant,
-        e.remark,
-        e.receipt ? '有' : '无',
-      ]),
+      ['日期', '分类', '分摊金额', '总金额', '商家', '备注', '宠物', '票据'],
+      ...filteredExpenses.map(e => {
+        const pet = pets.find(p => p.id === e.pet_id);
+        const splitAmount = filterPetId ? getPetSplitAmount(e, filterPetId) : 0;
+        const totalAmount = e.splits && e.splits.length > 0 
+          ? e.splits.reduce((s, split) => s + split.amount, 0)
+          : e.amount;
+        
+        let petName = pet?.name || '';
+        if (e.splits && e.splits.length > 0) {
+          const splitPets = e.splits.map(s => {
+            const sp = pets.find(p => p.id === s.pet_id);
+            return `${sp?.name}(¥${s.amount})`;
+          }).join(', ');
+          petName = splitPets;
+        }
+        
+        return [
+          e.created_at,
+          CATEGORY_LABELS[e.category],
+          filterPetId ? splitAmount : totalAmount,
+          totalAmount,
+          e.merchant,
+          e.remark,
+          petName,
+          e.receipt ? '有' : '无',
+        ];
+      }),
     ];
     
     const ws2 = XLSX.utils.aoa_to_sheet(detailData);
     XLSX.utils.book_append_sheet(wb, ws2, '消费明细');
+    
+    if (filteredExpenses.some(e => e.receipt)) {
+      const receiptData = filteredExpenses
+        .filter(e => e.receipt)
+        .map(e => {
+          const pet = pets.find(p => p.id === e.pet_id);
+          const splitAmount = filterPetId ? getPetSplitAmount(e, filterPetId) : 0;
+          return [
+            e.created_at,
+            CATEGORY_LABELS[e.category],
+            filterPetId ? splitAmount : e.amount,
+            e.merchant,
+            e.remark,
+            pet?.name || '',
+          ];
+        });
+      
+      if (receiptData.length > 0) {
+        const receiptSheetData = [
+          ['日期', '分类', '金额', '商家', '备注', '宠物'],
+          ...receiptData,
+        ];
+        const ws3 = XLSX.utils.aoa_to_sheet(receiptSheetData);
+        XLSX.utils.book_append_sheet(wb, ws3, '有票据记录');
+      }
+    }
     
     XLSX.writeFile(wb, `宠物消费报表_${selectedMonth}${filterDesc ? '_' + filterDesc : ''}.xlsx`);
   };
@@ -319,7 +388,8 @@ export default function ReportPage() {
         <div className="space-y-3">
           {topExpenses.map((expense, index) => {
             const pet = pets.find(p => p.id === expense.pet_id);
-            const splitTotal = Object.values(calculateSplitAmount(expense)).reduce((s, v) => s + v, 0);
+            const hasSplits = expense.splits && expense.splits.length > 0;
+            
             return (
               <div
                 key={expense.id}
@@ -334,14 +404,20 @@ export default function ReportPage() {
                       {CATEGORY_LABELS[expense.category]}
                     </span>
                     {expense.is_fixed && <span className="text-xs text-primary ml-2">固定</span>}
+                    {expense.receipt && <span className="text-xs text-secondary ml-2">📎</span>}
                   </p>
                   <div className="flex items-center gap-2 text-sm text-gray-500">
                     <span>{pet?.avatar} {pet?.name}</span>
+                    {hasSplits && (
+                      <span className="text-xs bg-gray-200 px-2 py-0.5 rounded">
+                        已分摊
+                      </span>
+                    )}
                     <span>•</span>
                     <span>{expense.remark || expense.merchant || '无备注'}</span>
                   </div>
                 </div>
-                <p className="text-lg font-bold text-accent">{formatCurrency(splitTotal)}</p>
+                <p className="text-lg font-bold text-accent">{formatCurrency(expense.displayAmount)}</p>
               </div>
             );
           })}

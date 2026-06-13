@@ -29,6 +29,14 @@ export const saveData = <T>(key: string, data: T): void => {
 
 export const getCurrentMonth = () => format(new Date(), 'yyyy-MM');
 
+export const getPetSplitAmount = (expense: Expense, petId: string): number => {
+  if (expense.splits && expense.splits.length > 0) {
+    const split = expense.splits.find(s => s.pet_id === petId);
+    return split ? split.amount : 0;
+  }
+  return expense.pet_id === petId ? expense.amount : 0;
+};
+
 export const calculateSplitAmount = (expense: Expense): { [petId: string]: number } => {
   const result: { [petId: string]: number } = {};
   
@@ -43,19 +51,25 @@ export const calculateSplitAmount = (expense: Expense): { [petId: string]: numbe
   return result;
 };
 
-export const getMonthlyTotal = (expenses: Expense[], month: string) => {
+export const getMonthlyTotal = (expenses: Expense[], month: string, petId?: string | null) => {
   return expenses
     .filter(e => e.created_at.startsWith(month))
     .reduce((sum, e) => {
+      if (petId) {
+        return sum + getPetSplitAmount(e, petId);
+      }
       const splits = calculateSplitAmount(e);
       return sum + Object.values(splits).reduce((s, a) => s + a, 0);
     }, 0);
 };
 
-export const getCategoryTotal = (expenses: Expense[], month: string, category: Category) => {
+export const getCategoryTotal = (expenses: Expense[], month: string, category: Category, petId?: string | null) => {
   return expenses
     .filter(e => e.created_at.startsWith(month) && e.category === category)
     .reduce((sum, e) => {
+      if (petId) {
+        return sum + getPetSplitAmount(e, petId);
+      }
       const splits = calculateSplitAmount(e);
       return sum + Object.values(splits).reduce((s, a) => s + a, 0);
     }, 0);
@@ -65,8 +79,7 @@ export const getPetTotal = (expenses: Expense[], month: string, petId: string) =
   return expenses
     .filter(e => e.created_at.startsWith(month))
     .reduce((sum, e) => {
-      const splits = calculateSplitAmount(e);
-      return sum + (splits[petId] || 0);
+      return sum + getPetSplitAmount(e, petId);
     }, 0);
 };
 
@@ -81,7 +94,7 @@ export const getFilteredExpenses = (
   if (petId) {
     filtered = filtered.filter(e => {
       const splits = calculateSplitAmount(e);
-      return splits[petId] !== undefined;
+      return splits[petId] !== undefined && splits[petId] > 0;
     });
   }
   
@@ -92,14 +105,21 @@ export const getFilteredExpenses = (
   return filtered;
 };
 
-export const getExpandedSplits = (expenses: Expense[]): { pet_id: string; expense: Expense; split_amount: number }[] => {
+export const getExpandedSplits = (expenses: Expense[], petId?: string | null): { pet_id: string; expense: Expense; split_amount: number }[] => {
   const result: { pet_id: string; expense: Expense; split_amount: number }[] = [];
   
   expenses.forEach(expense => {
-    const splits = calculateSplitAmount(expense);
-    Object.entries(splits).forEach(([petId, amount]) => {
-      result.push({ pet_id: petId, expense, split_amount: amount });
-    });
+    if (petId) {
+      const amount = getPetSplitAmount(expense, petId);
+      if (amount > 0) {
+        result.push({ pet_id: petId, expense, split_amount: amount });
+      }
+    } else {
+      const splits = calculateSplitAmount(expense);
+      Object.entries(splits).forEach(([pid, amount]) => {
+        result.push({ pet_id: pid, expense, split_amount: amount });
+      });
+    }
   });
   
   return result;

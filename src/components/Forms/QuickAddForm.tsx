@@ -28,7 +28,8 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
   const [category, setCategory] = useState<Category>('food');
   const [selectedPets, setSelectedPets] = useState<string[]>([pets[0]?.id || '']);
   const [splits, setSplits] = useState<{ [petId: string]: string }>({});
-  const [splitType, setSplitType] = useState<'equal' | 'custom'>('equal');
+  const [percentages, setPercentages] = useState<{ [petId: string]: string }>({});
+  const [splitType, setSplitType] = useState<'equal' | 'percentage' | 'custom'>('equal');
   const [merchant, setMerchant] = useState('');
   const [quantity, setQuantity] = useState('1');
   const [remark, setRemark] = useState('');
@@ -42,8 +43,11 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
       if (selectedPets.length > 1) {
         setSelectedPets(selectedPets.filter(id => id !== petId));
         const newSplits = { ...splits };
+        const newPercentages = { ...percentages };
         delete newSplits[petId];
+        delete newPercentages[petId];
         setSplits(newSplits);
+        setPercentages(newPercentages);
       }
     } else {
       setSelectedPets([...selectedPets, petId]);
@@ -54,6 +58,10 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
     setSplits({ ...splits, [petId]: value });
   };
   
+  const handlePercentageChange = (petId: string, value: string) => {
+    setPercentages({ ...percentages, [petId]: value });
+  };
+  
   const handleEqualSplit = () => {
     const total = parseFloat(amount) || 0;
     const perPet = (total / selectedPets.length).toFixed(2);
@@ -62,6 +70,7 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
       newSplits[id] = perPet;
     });
     setSplits(newSplits);
+    setPercentages({});
   };
   
   const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -81,8 +90,9 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
       return [];
     }
     
+    const total = parseFloat(amount) || 0;
+    
     if (splitType === 'equal') {
-      const total = parseFloat(amount) || 0;
       const perPet = total / selectedPets.length;
       return selectedPets.map(petId => ({
         pet_id: petId,
@@ -91,9 +101,20 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
       }));
     }
     
+    if (splitType === 'percentage') {
+      return selectedPets.map(petId => {
+        const pct = parseFloat(percentages[petId] || '0');
+        const splitAmount = (total * pct) / 100;
+        return {
+          pet_id: petId,
+          amount: parseFloat(splitAmount.toFixed(2)),
+          percentage: pct,
+        };
+      });
+    }
+    
     return selectedPets.map(petId => {
       const splitAmount = parseFloat(splits[petId] || '0');
-      const total = parseFloat(amount) || 0;
       return {
         pet_id: petId,
         amount: splitAmount,
@@ -141,10 +162,17 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
   };
   
   const totalAllocated = selectedPets.reduce((sum, petId) => {
+    if (splitType === 'percentage') {
+      const pct = parseFloat(percentages[petId] || '0');
+      return sum + pct;
+    }
     return sum + (parseFloat(splits[petId] || '0') || 0);
   }, 0);
   
   const total = parseFloat(amount) || 0;
+  const totalAmountDisplay = splitType === 'percentage' 
+    ? `${totalAllocated.toFixed(1)}%`
+    : `¥${totalAllocated.toFixed(2)}`;
   
   return (
     <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4">
@@ -245,7 +273,22 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setSplitType('custom')}
+                    onClick={() => {
+                      setSplitType('percentage');
+                      setSplits({});
+                    }}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium ${
+                      splitType === 'percentage' ? 'bg-primary text-white' : 'bg-white'
+                    }`}
+                  >
+                    按百分比
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSplitType('custom');
+                      setPercentages({});
+                    }}
                     className={`flex-1 py-2 rounded-lg text-sm font-medium ${
                       splitType === 'custom' ? 'bg-primary text-white' : 'bg-white'
                     }`}
@@ -256,29 +299,50 @@ export default function QuickAddForm({ onClose }: QuickAddFormProps) {
                 
                 {selectedPets.map((petId) => {
                   const pet = pets.find(p => p.id === petId);
+                  const pct = parseFloat(percentages[petId] || '0');
+                  const splitAmt = splitType === 'percentage' 
+                    ? ((total * pct) / 100).toFixed(2)
+                    : splits[petId] || '';
+                  
                   return (
                     <div key={petId} className="flex items-center gap-3">
                       <span className="text-xl">{pet?.avatar}</span>
                       <span className="flex-1 text-sm">{pet?.name}</span>
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">¥</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={splits[petId] || ''}
-                          onChange={(e) => handleSplitChange(petId, e.target.value)}
-                          placeholder="0.00"
-                          className="w-28 pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm text-right focus:ring-2 focus:ring-primary focus:border-transparent"
-                        />
-                      </div>
+                      {splitType === 'percentage' ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            value={percentages[petId] || ''}
+                            onChange={(e) => handlePercentageChange(petId, e.target.value)}
+                            placeholder="0"
+                            className="w-16 px-2 py-2 border border-gray-200 rounded-lg text-sm text-right focus:ring-2 focus:ring-primary focus:border-transparent"
+                          />
+                          <span className="text-gray-400">%</span>
+                          <span className="text-xs text-gray-500 ml-1">
+                            = ¥{splitAmt}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">¥</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={splits[petId] || ''}
+                            onChange={(e) => handleSplitChange(petId, e.target.value)}
+                            placeholder="0.00"
+                            className="w-28 pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm text-right focus:ring-2 focus:ring-primary focus:border-transparent"
+                          />
+                        </div>
+                      )}
                     </div>
                   );
                 })}
                 
                 <div className="flex justify-between text-sm">
                   <span>合计</span>
-                  <span className={totalAllocated === total ? 'text-green-500' : 'text-accent'}>
-                    ¥{totalAllocated.toFixed(2)} / ¥{total.toFixed(2)}
+                  <span className={Math.abs(totalAllocated - (splitType === 'percentage' ? 100 : total)) < 0.01 ? 'text-green-500' : 'text-accent'}>
+                    {totalAmountDisplay} / {splitType === 'percentage' ? '100%' : `¥${total.toFixed(2)}`}
                   </span>
                 </div>
               </div>
